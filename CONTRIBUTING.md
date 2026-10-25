@@ -1,61 +1,11 @@
-# 贡献指南
+# 参与开发
 
-感谢你愿意为 Godot Minigame 做贡献。
+开发环境和命令以 README 为准。运行 `python tools/test.py`，涉及引擎补丁时必须在清单指定的官方提交上执行 `fetch`、`apply`、`build` 和 `package`。
 
-## 提交 Issue
+日常命令从根目录 `build.py` 执行；`tools/` 放实现。微信运行时代码和配置统一维护在 `wechat/`，路径与组装产物一致；编译进引擎的适配维护在 `engine/`。
 
-- 一个问题一个 Issue（不要把多个不相关问题堆在同一个 Issue 里）
-- 请附带：
-  - Godot 版本（例如 4.4.0 / 4.5.1）
-  - 操作系统与架构（Windows/macOS/Linux，x86_64/arm64）
-  - 复现步骤、日志、截图（如果是下载/Release 相关问题，请附上 `owner/repo/tag` 与 `versions.yaml`）
+维护 JS 源码保持可读，不提交 `build/`、`dist/`、引擎二进制、PCK 或私人 AppID。C++ 音频修改维护在 `engine/patches/`，不要只修改本地拉取的 Godot 工作目录。
 
-## 开发环境
+同一份兼容逻辑只保留一个维护来源。修改源码覆盖或补丁后应使用新的 `--source` 目录验证，脚本不会覆盖已经适配的本地修改。
 
-- Godot 4.4+
-- Python 3 + SCons
-- 支持 C++17 的编译器
-- `godot-cpp` 子模块需要初始化：
-
-```bash
-git submodule update --init --recursive
-```
-
-## 构建
-
-推荐使用脚本：
-
-```bash
-./build_win.sh
-./build_linux.sh
-./build_osx.sh
-```
-
-或直接使用 SCons（示例）：
-
-```bash
-scons platform=windows arch=x86_64 target=template_release
-scons platform=linux arch=x86_64 target=template_release
-scons platform=macos arch=universal target=template_release embed_resources=yes
-```
-
-构建产物会安装到：
-
-- `demo/addons/godot-minigame/bin/<platform>/`
-
-## 模板分发与测试
-
-模板通过 Release 分发，详见：
-
-- `docs/release_distribution.md`
-- `docs/release_testing.md`
-
-## 提交 PR
-
-- 尽量小步提交：一个 PR 做一件事
-- 不要提交构建产物、Release 产物、以及个人发布脚本（`release/staging/` 与 `.private_release/` 已被忽略）
-- PR 描述中请说明：
-  - 修改动机
-  - 行为变化
-  - 如何验证（构建命令/截图/日志）
-
+PR 说明行为变化、构建配置、自动测试结果及微信开发者工具/真机验证情况；未执行的检查应明确标注。保留第三方来源与许可证。

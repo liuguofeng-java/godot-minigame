@@ -1,0 +1,21 @@
+{
+  "upstream_repo": "https://github.com/godotengine/godot.git",
+  "base_ref": "ed1daf0bf001b61586d9930840f2f1394092c079",
+  "base_label": "Godot 4.7.2-stable",
+  "source_dir": "build/godot-4.7.2",
+  "emscripten_version": "4.0.11",
+  "patches": [
+    "001-build-and-runtime-glue.patch",
+    "002-native-audio-routing.patch"
+  ],
+  "build_options": {
+    "platform": "web",
+    "target": "template_release",
+    "arch": "wasm32",
+    "optimize": "size",
+    "lto": "full",
+    "threads": "no",
+    "wasm_simd": "no",
+    "disable_3d": "yes"
+  }
+}

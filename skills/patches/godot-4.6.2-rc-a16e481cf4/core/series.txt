@@ -1,4 +1,0 @@
-001-build-and-runtime-glue.patch
-002-native-audio-routing.patch
-003-wxglx-nine-patch-expansion.patch
-004-wxglx-nine-patch-runtime-scope.patch

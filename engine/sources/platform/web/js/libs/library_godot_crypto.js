@@ -1,0 +1,9 @@
+// Legacy compatibility shim; not a cryptographically secure random generator.
+var crypto = {
+    getRandomValues(array) {
+        for (var i = 0; i < array.length; i++) {
+            array[i] = (Math.random() * 256) | 0;
+        }
+        return array;
+    },
+};

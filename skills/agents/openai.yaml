@@ -1,4 +1,0 @@
-interface:
-  display_name: "Godot WeChat Adapter"
-  short_description: "Apply the bundled Godot 4.6.2-rc WeChat adapter kit"
-  default_prompt: "Use $godot-wechat-minigame-adapter to apply the bundled Godot 4.6.2-rc WeChat Mini Game patchset to this official checkout."

@@ -1,218 +1,74 @@
-name: Build Godot Web Minimal (WeChat Compatible)
+name: Build WeChat Godot engine
 
 on:
   workflow_dispatch:
+    inputs:
+      enable_3d:
+        description: Include 3D engine features
+        type: boolean
+        default: false
+  push:
+    paths: ['build.py', 'wechat/**', 'engine/**', 'tools/**', 'tests/**', 'examples/**', '.github/workflows/main.yml']
+  pull_request:
+
+permissions:
+  contents: read
 
 concurrency:
-  group: build-minimal-web
+  group: wechat-engine-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      # ============================================================
-      # 1. 克隆 godot-minigame (包含 skills/ 补丁脚本)
-      # ============================================================
-      - name: Checkout godot-minigame
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          path: godot-minigame
-
-      # ============================================================
-      # 2. 克隆 Godot 官方源码并切换到指定提交
-      # ============================================================
-      - name: Checkout Godot source
-        uses: actions/checkout@v4
+          python-version: '3.10'
+      - uses: actions/setup-node@v4
         with:
-          repository: godotengine/godot
-          ref: a16e481cf424f8e39dc2cdea1a6bdc1e309acdc1
-          path: godot
-          submodules: recursive
-
-      # ============================================================
-      # 3. 安装依赖
-      # ============================================================
-      - name: Install dependencies
+          node-version: '22'
+      - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            scons \
-            pkg-config \
-            libx11-dev \
-            libxcursor-dev \
-            libxinerama-dev \
-            libgl1-mesa-dev \
-            libglu-dev \
-            libasound2-dev \
-            libpulse-dev \
-            libfreetype6-dev \
-            libssl-dev \
-            libudev-dev \
-            libxi-dev \
-            libxrandr-dev \
-            yasm \
-            python3-pip \
-            ccache \
-            brotli \
-            ripgrep
-
-      # ============================================================
-      # 4. 配置 ccache
-      # ============================================================
-      - name: Configure ccache
+          sudo apt-get install -y brotli
+          python -m pip install scons
+      - name: Test adaptation and packaging
+        run: python tools/test.py
+      - name: Read pinned Emscripten version
+        id: toolchain
         run: |
-          echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
-          mkdir -p "$GITHUB_WORKSPACE/.ccache"
-          ccache --set-config=cache_dir="$GITHUB_WORKSPACE/.ccache"
-          ccache --set-config=max_size=5G
-          ccache --set-config=compiler_check=content
-          ccache --set-config=compression=true
-          ccache --set-config=compression_level=1
-
-      - name: Restore ccache
-        uses: actions/cache@v4
+          python -c 'import json,os; m=json.load(open("engine/manifest.json")); print("version="+m["emscripten_version"], file=open(os.environ["GITHUB_OUTPUT"],"a"))'
+      - uses: actions/cache@v4
         with:
-          path: .ccache
-          key: godot-4.6.2-web-ccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('godot/SConstruct', 'godot/platform/web/detect.py', 'godot/platform/web/SCsub') }}
-          restore-keys: |
-            godot-4.6.2-web-ccache-${{ runner.os }}-${{ runner.arch }}-
-
-      # ============================================================
-      # 5. 缓存并安装 Emscripten 4.0.10
-      # ============================================================
-      - name: Cache Emscripten
-        uses: actions/cache@v4
-        with:
-          path: |
-            emsdk
-            ~/.emscripten
-            ~/.cache/emscripten
-          key: emscripten-4.0.10-${{ runner.os }}-${{ runner.arch }}
-          restore-keys: |
-            emscripten-4.0.10-${{ runner.os }}-
-
-      - name: Setup Emscripten
-        run: |
-          if [ ! -d "emsdk" ]; then
-            git clone https://github.com/emscripten-core/emsdk.git
-          fi
-          cd emsdk
-          ./emsdk install 4.0.10
-          ./emsdk activate 4.0.10
-          echo "EMSDK_ROOT=$PWD" >> "$GITHUB_ENV"
-
-      # ============================================================
-      # 6. 应用 godot-minigame 适配补丁
-      # ============================================================
-      - name: Apply godot-minigame patchset
-        run: |
-          cd godot
-          python ../godot-minigame/skills/scripts/apply_godot_patchset.py .
-
-      - name: Verify patch applied
-        run: |
-          cd godot
-          rg -n "WXMEMFS|write_offset|getWindowInfo|showKeyboard|wx.exitMiniProgram|wasm_simd|wasm\.br" platform/web modules || true
-          node ../godot-minigame/skills/tests/test_wechat_audio_context_source_reuse.js platform/web/js/libs/library_godot_audio.js
-          node ../godot-minigame/skills/tests/test_wxglx_nine_patch_patch.js .
-          node ../godot-minigame/skills/tests/test_godot_process_commit_frame.js
-
-      # ============================================================
-      # 7. 编译 2D 裁剪模板
-      # ============================================================
-      - name: Build engine (minimal 2D)
+          path: build/emsdk-4.7.2
+          key: emsdk-${{ runner.os }}-${{ steps.toolchain.outputs.version }}
+      - name: Install pinned Emscripten
         env:
-          CCACHE_COMPRESS: true
-          CCACHE_COMPRESSLEVEL: 1
+          EMSCRIPTEN_VERSION: ${{ steps.toolchain.outputs.version }}
         run: |
-          source "${EMSDK_ROOT}/emsdk_env.sh"
-          cd godot
-          echo "========================================"
-          echo "BUILD GODOT 4.6.2 WEB (WeChat Compatible)"
-          echo "========================================"
-          scons \
-            platform=web \
-            target=template_release \
-            arch=wasm32 \
-            optimize=size \
-            lto=full \
-            threads=no \
-            wasm_simd=no \
-            disable_3d=yes \
-            c_compiler_launcher=ccache \
-            cpp_compiler_launcher=ccache \
-            --jobs=$(nproc)
-
-      # ============================================================
-      # 8. 执行微信后处理并组装 Release 同构的 engine 产物
-      # ============================================================
-      - name: Package WeChat engine artifact
+          test -d build/emsdk-4.7.2 || git clone --depth=1 https://github.com/emscripten-core/emsdk.git build/emsdk-4.7.2
+          build/emsdk-4.7.2/emsdk install "$EMSCRIPTEN_VERSION"
+          build/emsdk-4.7.2/emsdk activate "$EMSCRIPTEN_VERSION"
+      - name: Fetch and adapt official Godot
         run: |
-          cd godot
-
-          # 该脚本同时生成 godot.wasm.br 并对 godot.js 执行微信兼容补丁。
-          sh ./compress_wasm.sh
-
-          mkdir -p action-artifact/engine
-          cp bin/.web_zip/godot.js action-artifact/engine/godot.js
-          cp bin/.web_zip/godot.wasm.br action-artifact/engine/godot.wasm.br
-          cp ../godot-minigame/skills/assets/min-runtime/godot-sdk.js action-artifact/engine/godot-sdk.js
-          cp ../godot-minigame/demo/wxgame/engine/game.js action-artifact/engine/game.js
-
-          # Action 产物是可直接覆盖模板 engine/ 的四个文件，不允许混入原始构建中间件。
-          test -f action-artifact/engine/godot.js
-          test -f action-artifact/engine/godot.wasm.br
-          test -f action-artifact/engine/godot-sdk.js
-          test -f action-artifact/engine/game.js
-          test "$(find action-artifact/engine -maxdepth 1 -type f | wc -l)" -eq 4
-
-          rg -q "FS.mount\\(WXMEMFS" action-artifact/engine/godot.js
-          rg -q "nowPolyfill" action-artifact/engine/godot.js
-          rg -Fq "var __godotMinigameOriginalCommitFrame=_emscripten_webgl_commit_frame;" action-artifact/engine/godot.js
-          rg -q "root.fsUtils = fsUtils" action-artifact/engine/godot-sdk.js
-          if rg -Fq "var _emscripten_webgl_commit_frame=function(){};" action-artifact/engine/godot.js; then
-            echo "godot.js replaces Emscripten frame commit with a no-op"
-            exit 1
-          fi
-          if rg -q "FS.mount\\(IDBFS" action-artifact/engine/godot.js; then
-            echo "godot.js was not post-processed"
-            exit 1
-          fi
-          if rg -q "contextPool\\.pop" action-artifact/engine/godot.js; then
-            echo "godot.js still reuses InnerAudioContext across different sources"
-            exit 1
-          fi
-
-          mkdir -p action-runtime
-          cp ../godot-minigame/demo/wxgame/godot-loader.js action-runtime/godot-loader.js
-          cp -r action-artifact/engine action-runtime/engine
-          node ../godot-minigame/skills/scripts/validate_template_runtime.js action-runtime wxglx
-
-      # ============================================================
-      # 9. 显示编译结果
-      # ============================================================
-      - name: Show build results
+          python build.py fetch
+          python build.py apply
+          python build.py apply
+          python build.py build --enable-3d --dry-run
+      - name: Build engine
+        env:
+          ENABLE_3D: ${{ inputs.enable_3d || false }}
         run: |
-          cd godot
-          echo "========================================"
-          echo "ENGINE ARTIFACT"
-          echo "========================================"
-          find action-artifact -type f -exec ls -lh {} \;
-
-      - name: Show ccache stats
-        run: |
-          ccache --show-stats
-          du -sh "$CCACHE_DIR" || true
-
-      # ============================================================
-      # 10. 上传产物 (WASM + JS)
-      # ============================================================
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+          source build/emsdk-4.7.2/emsdk_env.sh
+          args=()
+          if [ "$ENABLE_3D" = true ]; then args+=(--enable-3d); fi
+          python build.py build --jobs 2 "${args[@]}"
+      - name: Assemble template (PCK and AppID required before preview)
+        run: python build.py package
+      - uses: actions/upload-artifact@v4
         with:
-          name: godot-minigame-web
-          path: godot/action-artifact/
+          name: wechat-engine-template-${{ inputs.enable_3d && '3d' || '2d' }}
+          path: dist/wxgame/
           if-no-files-found: error
