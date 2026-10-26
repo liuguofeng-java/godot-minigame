@@ -124,6 +124,54 @@ class PipelineTest(unittest.TestCase):
         })
         return binary
 
+    def pck_fixture(self, version=(4, 7, 2)):
+        path = Path(self.tmp.name) / 'sample.pck'
+        header = (b'GDPC' + (4).to_bytes(4, 'little') +
+                  b''.join(part.to_bytes(4, 'little') for part in version))
+        path.write_bytes(header + b'Godot PCK fixture\x00' * 16)
+        return path
+
+    def test_pack_pck_rejects_invalid_header_and_version(self):
+        pck = self.pck_fixture()
+        pck.write_bytes(b'not a PCK')
+        with self.assertRaisesRegex(RuntimeError, 'Invalid PCK header'):
+            self.pipe.pack_pck(pck, 'https://cdn.example.com/game/', Path(self.tmp.name) / 'packs')
+        pck = self.pck_fixture(version=(4, 8, 0))
+        with self.assertRaisesRegex(RuntimeError, 'expected 4.7.2'):
+            self.pipe.pack_pck(pck, 'https://cdn.example.com/game/', Path(self.tmp.name) / 'packs')
+        pck = self.pck_fixture()
+        with self.assertRaisesRegex(RuntimeError, 'HTTPS directory URL'):
+            self.pipe.pack_pck(pck, 'http://cdn.example.com/game/', Path(self.tmp.name) / 'packs')
+
+    @unittest.skipUnless(shutil.which('brotli'), 'Brotli CLI required for PCK packaging test')
+    def test_pack_pck_roundtrip_and_remote_template(self):
+        pck = self.pck_fixture()
+        packs = Path(self.tmp.name) / 'packs'
+        artifact, config_path = self.pipe.pack_pck(pck, 'https://cdn.example.com/game/', packs)
+        self.assertEqual(subprocess.check_output(['brotli', '-d', '-c', str(artifact)]), pck.read_bytes())
+        config = json.loads(config_path.read_text(encoding='utf-8'))
+        self.assertEqual(config['url'], 'https://cdn.example.com/game/' + artifact.name)
+        self.assertEqual(config['pck_sha256'], pipeline.sha(pck))
+        self.assertEqual(config['br_sha256'], pipeline.sha(artifact))
+        self.assertEqual(self.pipe.pack_pck(pck, 'https://cdn.example.com/game/', packs),
+                         (artifact, config_path))
+        self.fake_build()
+        output = Path(self.tmp.name) / 'remote-template'
+        self.pipe.package(self.source, output, config_path)
+        self.assertFalse((output / 'engine/demo-pck.bin').exists())
+        self.assertIn(config['url'], (output / 'engine/pack-config.js').read_text(encoding='utf-8'))
+        self.assertEqual(json.loads((output / 'build-info.json').read_text())['pack_mode'], 'remote')
+        bundled_output = Path(self.tmp.name) / 'bundled-project'
+        self.pipe.package(self.source, bundled_output, bundled_pack_config=config_path)
+        self.assertEqual((bundled_output / 'engine/demo-pck.br').read_bytes(), artifact.read_bytes())
+        self.assertIn('"mode": "bundled_br"',
+                      (bundled_output / 'engine/pack-config.js').read_text(encoding='utf-8'))
+        self.assertEqual(json.loads((bundled_output / 'build-info.json').read_text())['pack_mode'], 'bundled_br')
+        config['br_sha256'] = '0' * 64
+        pipeline.write_json(config_path, config)
+        with self.assertRaisesRegex(RuntimeError, 'missing or changed'):
+            self.pipe.package(self.source, Path(self.tmp.name) / 'bad-remote', config_path)
+
     @unittest.skipUnless(shutil.which('brotli'), 'Brotli CLI required for real packaging test')
     def test_package_template_and_output_protection(self):
         binary = self.fake_build()

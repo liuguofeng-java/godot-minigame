@@ -132,49 +132,101 @@
         return root.canvas || gameGlobal.canvas || windowObject.canvas;
     }
 
-    function startGame(executable, pack) {
+    function runEngine(executable, packPath, bytes) {
+        const engine = new root.Engine({ canvas: getCanvas() });
+        gameGlobal.GODOTSDK.engine = engine;
+        const init = engine.init(executable);
+        const preload = bytes ? engine.preloadFile(bytes, packPath) : engine.preloadFile(packPath);
+        return Promise.all([init, preload]).then(function () {
+            return engine.start({
+                args: ["--main-pack", packPath],
+                onProgress: function (current, total) {
+                    console.log("Loaded " + current + " of " + total + " bytes");
+                },
+            });
+        });
+    }
+
+    async function startGame(executable, pack, decodeBr) {
         const loader = gameGlobal.godotLoader;
 
         if (!root.Engine) {
-            return Promise.reject(new Error("Engine is not available"));
+            throw new Error("Engine is not available");
         }
 
         if (typeof root.Engine.isWebGLAvailable === "function" && !root.Engine.isWebGLAvailable()) {
             if (loader) {
                 loader.currentText = "WebGL not available!";
             }
-            return Promise.reject(new Error("WebGL not available"));
+            throw new Error("WebGL not available");
         }
-
-        if (loader && loader.config && loader.config.textConfig) {
-            loader.currentText = loader.config.textConfig.compilingText;
-        }
-
-        const engine = new root.Engine({ canvas: getCanvas() });
-        gameGlobal.GODOTSDK.engine = engine;
-
-        return Promise.all([engine.init(executable), engine.preloadFile(pack)])
-            .then(function () {
-                if (loader && loader.config && loader.config.textConfig) {
-                    loader.currentText = loader.config.textConfig.initText;
+        const config = typeof pack === "string" ? { mode: "local", path: pack } : pack;
+        try {
+            if (config && config.mode === "remote") {
+                const remote = gameGlobal.remotePack;
+                if (!remote) throw new Error("Remote PCK runtime is not available");
+                if (loader && typeof loader.updateProgress === "function") {
+                    loader.updateProgress(0.5, "正在下载游戏资源");
                 }
-
-                if (loader && typeof loader.cleanup === "function") {
-                    loader.cleanup();
-                }
-
-                return engine.start({
-                    args: ["--main-pack", pack],
-                    onProgress: function (current, total) {
-                        console.log("Loaded " + current + " of " + total + " bytes");
-                    },
+                let candidate = await remote.prepare(config, decodeBr, function (percent) {
+                    if (loader && typeof loader.updateProgress === "function") {
+                        loader.updateProgress(0.5 + Math.max(0, Math.min(100, percent)) * 0.004,
+                            "正在下载游戏资源");
+                    }
                 });
-            })
-            .then(function () {
-                if (loader && loader.config && loader.config.textConfig) {
-                    loader.currentText = loader.config.textConfig.completeText;
+                if (loader && typeof loader.updateProgress === "function") {
+                    loader.updateProgress(0.92, "正在启动游戏");
                 }
-            });
+                try {
+                    await runEngine(executable, candidate.config.path, candidate.bytes);
+                } catch (error) {
+                    if (candidate.fromCache) throw error;
+                    console.warn("New PCK failed to start; retrying previous successful version", error);
+                    candidate = await remote.fallback(config, decodeBr);
+                    await runEngine(executable, candidate.config.path, candidate.bytes);
+                }
+                if (!candidate.fromCache) {
+                    try {
+                        await remote.commit(candidate);
+                    } catch (error) {
+                        console.warn("PCK started but could not be cached", error);
+                    }
+                }
+            } else if (config && config.mode === "bundled_br") {
+                if (config.path !== "/engine/demo-pck.bin" || config.file !== "engine/demo-pck.br" ||
+                        !gameGlobal.remotePack || typeof decodeBr !== "function") {
+                    throw new Error("Invalid bundled Brotli PCK config");
+                }
+                if (loader && typeof loader.updateProgress === "function") {
+                    loader.updateProgress(0.5, "正在解压游戏资源");
+                }
+                const compressed = await fsUtils.localFetch(config.file);
+                const bytes = gameGlobal.remotePack.decodeCompressed(compressed, config, decodeBr);
+                await runEngine(executable, config.path, bytes);
+            } else if (config && config.mode === "local" && typeof config.path === "string") {
+                if (loader && loader.config && loader.config.textConfig) {
+                    loader.currentText = loader.config.textConfig.compilingText;
+                }
+                await runEngine(executable, config.path);
+            } else {
+                throw new Error("Invalid PCK startup config");
+            }
+            if (loader && loader.config && loader.config.textConfig) {
+                loader.currentText = loader.config.textConfig.completeText;
+            }
+            if (loader && typeof loader.updateProgress === "function") {
+                loader.updateProgress(1);
+            }
+            if (loader && typeof loader.cleanup === "function") {
+                loader.cleanup();
+            }
+        } catch (error) {
+            if (loader) {
+                loader.currentText = "游戏资源加载失败，请检查网络或控制台";
+                if (typeof loader.render === "function") loader.render();
+            }
+            throw error;
+        }
     }
 
     const GODOTSDK = gameGlobal.GODOTSDK || {};

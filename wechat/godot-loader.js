@@ -401,8 +401,7 @@
             const task = wxApi.loadSubpackage({
                 name: "engine",
                 success: () => {
-                    this.progress = 1;
-                    this.updateProgress(this.progress, this.config.textConfig.initText);
+                    this.updateProgress(0.5, this.config.textConfig.initText);
                 },
                 fail: (error) => {
                     this.currentText = "引擎加载失败，请检查控制台";
@@ -412,7 +411,8 @@
 
             if (task && typeof task.onProgressUpdate === "function") {
                 task.onProgressUpdate(({ progress }) => {
-                    this.updateProgress(progress, this.config.textConfig.downloadingText[0]);
+                    this.updateProgress(this.normalizeProgress(progress) * 0.5,
+                        this.config.textConfig.downloadingText[0]);
                 });
             }
         }

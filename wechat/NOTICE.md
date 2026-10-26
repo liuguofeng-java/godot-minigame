@@ -16,3 +16,7 @@ old minified SDK.
 The engine source overlay `library_blob.js` retains the MIT notice naming
 Eli Grey and Jimmy Wärting. Other inherited Godot source notices remain in place.
 Godot itself is fetched from the official repository with its original license.
+
+`engine/vendor/brotli-decode.js` is Google's Brotli JavaScript decoder from
+`google/brotli` v1.1.0. Its MIT license is copied to
+`engine/vendor/BROTLI-LICENSE.txt`.

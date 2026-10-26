@@ -27,6 +27,11 @@ async function test() {
     assert.equal((await context.fsUtils.localFetch("engine/demo-pck.bin")).byteLength, 2);
     await context.GameGlobal.GODOTSDK.startGame("/engine/godot", "/engine/demo-pck.bin");
     assert.deepEqual(events, ["init", "/engine/demo-pck.bin", "--main-pack /engine/demo-pck.bin"]);
+    events.length = 0;
+    await context.GameGlobal.GODOTSDK.startGame("/engine/godot", {
+        mode: "local", path: "/engine/demo-pck.bin",
+    });
+    assert.deepEqual(events, ["init", "/engine/demo-pck.bin", "--main-pack /engine/demo-pck.bin"]);
     hide(); show();
     assert.deepEqual(events.slice(-2), ["suspend", "resume"]);
     delete context.Engine;

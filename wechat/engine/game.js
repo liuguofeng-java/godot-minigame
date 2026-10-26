@@ -1,8 +1,13 @@
 
+import packConfig from './pack-config'
+import scenePackConfig from './scene-pack-config'
+import { BrotliDecode } from './vendor/brotli-decode'
+import './remote-pack'
 import './godot-sdk'
+import './scene-packs'
 import './godot'
 const exe = '/engine/godot';
-const pack = '/engine/demo-pck.bin';
-GameGlobal.GODOTSDK.startGame(exe, pack).catch((error) => {
-    console.error('Godot startup failed. Check the matching engine pair and engine/demo-pck.bin.', error);
+GameGlobal.scenePacks.configure(scenePackConfig, BrotliDecode);
+GameGlobal.GODOTSDK.startGame(exe, packConfig, BrotliDecode).catch((error) => {
+    console.error('Godot startup failed. Check the engine, PCK configuration and network.', error);
 });

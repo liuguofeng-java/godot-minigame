@@ -12,7 +12,7 @@
     "platform": "web",
     "target": "template_release",
     "arch": "wasm32",
-    "optimize": "size",
+    "optimize": "size_extra",
     "lto": "full",
     "threads": "no",
     "wasm_simd": "no",
