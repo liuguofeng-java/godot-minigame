@@ -19,6 +19,14 @@ var output_button: Button
 var brotli: LineEdit
 var brotli_button: Button
 var summary: Label
+## 导出过程中显示已完成步骤和当前阶段。
+var progress_row: HBoxContainer
+## 显示当前阶段名称。
+var progress_label: Label
+## 显示按已完成步骤计算的进度。
+var progress_bar: ProgressBar
+## 显示已完成步骤和总步骤数。
+var progress_count: Label
 var report: Tree
 var status: TextEdit
 var notice: Label
@@ -143,10 +151,21 @@ func _build_settings() -> void:
 	resource_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	resource_hint.modulate.a = 0.75
 
+## 建立分析结果页和后台导出的进度栏。
 func _build_results() -> void:
 	var page := _page("分析结果")
 	summary = _label(page, "尚未分析。配置资源包后，点击“分析依赖”检查整个项目。")
 	summary.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	progress_row = _row(page)
+	progress_row.visible = false
+	progress_label = _label(progress_row, "准备导出")
+	progress_label.custom_minimum_size.x = 120 * _scale
+	progress_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	progress_bar = ProgressBar.new()
+	progress_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	progress_bar.show_percentage = false
+	progress_row.add_child(progress_bar)
+	progress_count = _label(progress_row, "0/0 步")
 	var split := VSplitContainer.new()
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	page.add_child(split)
@@ -229,7 +248,9 @@ func show_message(message: String, details: String = "", reveal: bool = false, f
 		summary.text = message
 		summary.tooltip_text = message
 
+## 展示最新分析结果并收起上一次导出的进度。
 func show_analysis(result: Dictionary) -> void:
+	progress_row.visible = false
 	report.clear()
 	var root := report.create_item()
 	for id: String in result.get("order", []):
@@ -244,6 +265,36 @@ func show_export(manifest: Dictionary) -> void:
 		var item := report.create_item(root)
 		_cells(item, [id, str(pack.archive_files.size()), String.humanize_size(pack.pck_size), String.humanize_size(pack.br_size), ", ".join(pack.depends) if not pack.depends.is_empty() else "无"])
 		item.set_tooltip_text(3, "压缩后为原始大小的 %.1f%%" % (100.0 * pack.br_size / pack.pck_size))
+
+## 开始新的后台导出，清除上次的进度状态。
+func start_export_progress(total: int) -> void:
+	progress_row.visible = true
+	progress_bar.max_value = maxi(total, 1)
+	progress_bar.value = 0
+	progress_label.text = "准备导出"
+	progress_count.text = "0/%s 步" % total
+	show_message("准备导出 · 0/%s 步" % total, "后台导出已启动，期间请勿修改资源。", true)
+
+## 显示工作进程报告的真实步骤进度与当前阶段。
+func show_export_progress(done: int, total: int, stage: String) -> void:
+	if total <= 0 or done < 0 or done > total:
+		return
+	progress_row.visible = true
+	progress_bar.max_value = total
+	progress_bar.value = done
+	progress_label.text = stage
+	progress_label.tooltip_text = stage
+	progress_count.text = "%s/%s 步" % [done, total]
+	show_message("%s · %s/%s 步" % [stage, done, total], "当前阶段：%s\n已完成 %s/%s 个导出步骤。" % [stage, done, total], true)
+
+## 保留失败时已完成的步骤；只有成功时将进度置满。
+func finish_export_progress(success: bool) -> void:
+	if success:
+		progress_bar.value = progress_bar.max_value
+		progress_count.text = "%s/%s 步" % [int(progress_bar.max_value), int(progress_bar.max_value)]
+		progress_label.text = "导出完成"
+	else:
+		progress_label.text = "导出中断"
 
 func _cells(item: TreeItem, values: Array) -> void:
 	for index in values.size():

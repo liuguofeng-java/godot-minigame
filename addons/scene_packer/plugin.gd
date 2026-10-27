@@ -22,14 +22,26 @@ var rebuilding := false
 var pid := -1
 var result_path := ""
 var log_path := ""
+## 后台日志的已读取字节位置，避免轮询时反复解析整个文件。
+var log_offset := 0
 var poll: Timer
 var config_watch: Timer
+## 连续资源勾选合并为一次依赖分析，避免每次点击阻塞编辑器。
+var analysis_timer: Timer
+## 复用未变化资源的依赖扫描结果。
+var live_analyzer: ANALYZER
 var disk_hash := ""
 var baseline: Dictionary = {}
 var syncing := false
 var closing := false
 var analysis_queued := false
 var tree_query := ""
+## 当前筛选结果中的树节点，用于勾选后原位更新而不重建整棵树。
+var tree_items: Dictionary = {}
+## 当前树节点中代表文件的路径。
+var tree_file_paths: Dictionary = {}
+## 最近一次树构建所依据的完整文件列表。
+var tree_files: Array[String] = []
 
 func _enter_tree() -> void:
 	var saved: Variant = JSON.parse_string(FileAccess.get_file_as_string(CONFIG)) if FileAccess.file_exists(CONFIG) else null
@@ -75,6 +87,12 @@ func _enter_tree() -> void:
 	config_watch.autostart = true
 	config_watch.timeout.connect(_check_external_config)
 	panel.add_child(config_watch)
+	analysis_timer = Timer.new()
+	analysis_timer.one_shot = true
+	analysis_timer.wait_time = 0.25
+	analysis_timer.timeout.connect(_run_live_analysis)
+	panel.add_child(analysis_timer)
+	live_analyzer = ANALYZER.new()
 	add_control_to_bottom_panel(panel, "场景分包")
 	add_tool_menu_item("打开场景分包", func() -> void: make_bottom_panel_item_visible(panel))
 	_refresh_packs()
@@ -157,7 +175,7 @@ func _select_pack(index: int) -> void:
 		return
 	current = selected
 	depends.text = ", ".join(config.packs[current].get("depends", []))
-	_refresh_tree()
+	_update_tree_selection(ANALYZER.new().scan())
 
 func _refresh_tree() -> void:
 	var expanded: Dictionary = {}
@@ -169,15 +187,15 @@ func _refresh_tree() -> void:
 	var scroll := tree.get_scroll()
 	rebuilding = true
 	tree.clear()
+	tree_items.clear()
+	tree_file_paths.clear()
 	var root := tree.create_item()
 	var nodes: Dictionary = {"res://": root}
 	var query := panel.search.text.strip_edges().to_lower()
 	var files: Array[String] = ANALYZER.new().scan()
+	tree_files = files
 	var selection_index: Dictionary = SELECTION.index(files, config.packs, current)
-	panel.select_pack(current, config.packs.size(), int(selection_index.counts.get(current, 0)))
-	for item_index in packs.item_count:
-		var id := str(packs.get_item_metadata(item_index))
-		packs.set_item_text(item_index, "%s · %s" % [id, selection_index.counts.get(id, 0)])
+	_refresh_counts(selection_index)
 	for file: String in files:
 		if not query.is_empty() and not file.to_lower().contains(query):
 			continue
@@ -190,26 +208,16 @@ func _refresh_tree() -> void:
 				item.set_cell_mode(0, TreeItem.CELL_MODE_CHECK)
 				item.set_text(0, segments[index])
 				item.set_metadata(0, child_path)
-				item.set_editable(0, not current.is_empty())
 				item.collapsed = bool(expanded.get(child_path, index > 0)) if query == tree_query else index > 0 and query.is_empty()
 				item.set_text_overrun_behavior(0, TextServer.OVERRUN_TRIM_ELLIPSIS)
 				item.set_text_overrun_behavior(1, TextServer.OVERRUN_TRIM_ELLIPSIS)
 				var state: Dictionary = selection_index.nodes[child_path]
-				item.set_checked(0, state.selected == state.total)
-				item.set_indeterminate(0, state.selected > 0 and state.selected < state.total)
-				item.set_tooltip_text(0, child_path + "\n当前包已选 %s / %s 个文件；勾选目录会作用于全部子项。" % [state.selected, state.total])
-				var assigned: Array = state.owners.keys()
-				assigned.sort()
-				var labels: Array[String] = []
-				for id: String in assigned:
-					labels.append(id + ("（部分）" if state.owners[id] < state.total else ""))
-				var owner_text := ", ".join(labels) if not labels.is_empty() else "未分配"
-				item.set_text(1, owner_text)
-				item.set_tooltip_text(1, owner_text)
-				if state.conflicts > 0:
-					item.set_custom_color(1, panel.get_theme_color("error_color", "Editor"))
-					item.set_tooltip_text(1, owner_text + "\n%s 个文件存在重复归属。" % state.conflicts)
+				var is_file := index == segments.size() - 1
+				_configure_tree_item(item, child_path, state, is_file)
 				nodes[child_path] = item
+				tree_items[child_path] = item
+				if is_file:
+					tree_file_paths[child_path] = true
 				if child_path == focused:
 					item.select(0)
 			path = child_path
@@ -225,6 +233,53 @@ func _refresh_tree() -> void:
 			child.set_deferred("value", scroll.y)
 		elif child is HScrollBar:
 			child.set_deferred("value", scroll.x)
+
+## 勾选后仅更新已有行，保留滚动、展开与焦点状态。
+func _update_tree_selection(files: Array[String]) -> void:
+	if files != tree_files:
+		_refresh_tree()
+		return
+	var selection_index: Dictionary = SELECTION.index(files, config.packs, current)
+	_refresh_counts(selection_index)
+	for path: String in tree_items:
+		_configure_tree_item(tree_items[path], path, selection_index.nodes[path], tree_file_paths.has(path))
+
+## 同步当前包和左侧包列表中的文件数量。
+func _refresh_counts(selection_index: Dictionary) -> void:
+	panel.select_pack(current, config.packs.size(), int(selection_index.counts.get(current, 0)))
+	for item_index in packs.item_count:
+		var id := str(packs.get_item_metadata(item_index))
+		packs.set_item_text(item_index, "%s · %s" % [id, selection_index.counts.get(id, 0)])
+
+## 根据完整资源归属更新单行的勾选、禁用和提示状态。
+func _configure_tree_item(item: TreeItem, path: String, state: Dictionary, is_file: bool) -> void:
+	var next_checked: bool = state.selected < state.total
+	var foreign: Array[String] = SELECTION.foreign_owners(state, current)
+	item.set_editable(0, SELECTION.can_toggle(state, current, is_file, next_checked))
+	item.set_checked(0, state.selected == state.total)
+	item.set_indeterminate(0, state.selected > 0 and state.selected < state.total)
+	var checkbox_hint := "勾选目录会作用于全部子项。"
+	if not foreign.is_empty():
+		if not is_file:
+			checkbox_hint = "目录包含已归属 %s 的文件，目录勾选已禁用；可展开选择未占用的子项。" % ", ".join(foreign)
+		elif state.selected == state.total:
+			checkbox_hint = "与 %s 重复归属；可取消当前包的勾选。" % ", ".join(foreign)
+		else:
+			checkbox_hint = "已归属 %s，当前包不可勾选。" % ", ".join(foreign)
+	item.set_tooltip_text(0, path + "\n当前包已选 %s / %s 个文件；" % [state.selected, state.total] + checkbox_hint)
+	var assigned: Array = state.owners.keys()
+	assigned.sort()
+	var labels: Array[String] = []
+	for id: String in assigned:
+		labels.append(id + ("（部分）" if state.owners[id] < state.total else ""))
+	var owner_text := ", ".join(labels) if not labels.is_empty() else "未分配"
+	item.set_text(1, owner_text)
+	item.set_tooltip_text(1, owner_text)
+	if state.conflicts > 0:
+		item.set_custom_color(1, panel.get_theme_color("error_color", "Editor"))
+		item.set_tooltip_text(1, owner_text + "\n%s 个文件存在重复归属。" % state.conflicts)
+	else:
+		item.clear_custom_color(1)
 
 func _remember_tree(item: TreeItem, expanded: Dictionary) -> void:
 	var path: Variant = item.get_metadata(0)
@@ -244,23 +299,30 @@ func _item_edited() -> void:
 	_set_resource_checked.call_deferred(str(item.get_metadata(0)), item.is_checked(0), current)
 
 func _set_resource_checked(path: String, checked: bool, selected: String) -> void:
-	if closing or not _save() or not config.packs.has(selected):
+	if closing or selected != current or not _save() or not config.packs.has(selected):
+		return
+	# 延迟处理前重新扫描完整资源树，避免筛选或外部配置更新导致重复归属。
+	var files: Array[String] = ANALYZER.new().scan()
+	var selection_index: Dictionary = SELECTION.index(files, config.packs, selected)
+	if not selection_index.nodes.has(path) or not SELECTION.can_toggle(selection_index.nodes[path], selected, files.has(path), checked):
+		_refresh_tree()
 		return
 	config.packs[selected] = SELECTION.toggle(config.packs[selected], path, checked)
 	if not _save():
 		_refresh_tree()
 		return
-	_refresh_tree()
+	_update_tree_selection(files)
 	_queue_analysis()
 
 func _queue_analysis() -> void:
-	if closing or pid > 0 or analysis_queued:
+	if closing or pid > 0:
 		return
+	if not analysis_queued:
+		panel.report.clear()
+		panel.summary.text = "正在更新依赖与体积…"
+		panel.show_message("选择已保存，正在更新依赖与体积…")
 	analysis_queued = true
-	panel.report.clear()
-	panel.summary.text = "正在更新依赖与体积…"
-	panel.show_message("选择已保存，正在更新依赖与体积…")
-	_run_live_analysis.call_deferred()
+	analysis_timer.start()
 
 func _save_options() -> void:
 	if _save():
@@ -270,7 +332,7 @@ func _run_live_analysis() -> void:
 	analysis_queued = false
 	if closing or syncing or pid > 0:
 		return
-	_present_analysis(ANALYZER.new().analyze(_capture_config()), false)
+	_present_analysis(live_analyzer.analyze(_capture_config()), false)
 
 func _capture_config() -> Dictionary:
 	var draft := config.duplicate(true)
@@ -374,6 +436,8 @@ func _save() -> bool:
 func _analyze() -> Dictionary:
 	if not _save():
 		return {"errors": ["配置保存失败。"]}
+	analysis_timer.stop()
+	analysis_queued = false
 	var report: Dictionary = ANALYZER.new().analyze(config)
 	_present_analysis(report)
 	return report
@@ -391,8 +455,12 @@ func _present_analysis(report: Dictionary, reveal: bool = true) -> void:
 	panel.summary.text = panel.notice.text
 	panel.summary.tooltip_text = panel.notice.tooltip_text
 
+## 验证配置后启动后台导出并初始化面板进度。
 func _export() -> void:
-	if pid > 0 or not _analyze().errors.is_empty():
+	if pid > 0:
+		return
+	var analysis: Dictionary = _analyze()
+	if not analysis.errors.is_empty():
 		return
 	EditorInterface.save_all_scenes()
 	var cache := OS.get_cache_dir().path_join("scene-packer")
@@ -400,6 +468,7 @@ func _export() -> void:
 	var stem := str(Time.get_ticks_usec())
 	result_path = cache.path_join(stem + ".json")
 	log_path = cache.path_join(stem + ".log")
+	log_offset = 0
 	var args := PackedStringArray(["--headless", "--path", ProjectSettings.globalize_path("res://"),
 		"--log-file", log_path, "--script", "res://addons/scene_packer/export_job.gd", "--",
 		"--config", ProjectSettings.globalize_path(CONFIG), "--output", ProjectSettings.globalize_path(destination.text),
@@ -411,16 +480,47 @@ func _export() -> void:
 		panel.show_message("无法启动导出进程。", "", true, true)
 		return
 	panel.set_busy(true)
-	panel.show_message("正在导出…", "后台导出已启动，期间请勿修改资源。", true)
+	panel.start_export_progress(6 + analysis.order.size() + 1)
 	poll.start()
 
+## 只读取后台日志新增的完整行，并接受结构化的进度事件。
+func _read_export_progress() -> void:
+	if not FileAccess.file_exists(log_path):
+		return
+	var file := FileAccess.open(log_path, FileAccess.READ)
+	if file == null:
+		return
+	var length := file.get_length()
+	if length < log_offset:
+		log_offset = 0
+	file.seek(log_offset)
+	var latest: Dictionary = {}
+	while file.get_position() < length:
+		var start := file.get_position()
+		var line := file.get_line()
+		if file.get_position() == length:
+			# 末尾未换行的日志可能还在写入，下轮从该行重新读取。
+			file.seek(length - 1)
+			if file.get_8() != 10:
+				log_offset = start
+				break
+		log_offset = file.get_position()
+		var at := line.find("SCENE_PACKS_PROGRESS ")
+		if at < 0:
+			continue
+		var event: Variant = JSON.parse_string(line.substr(at + "SCENE_PACKS_PROGRESS ".length()))
+		if not event is Dictionary:
+			continue
+		if not (event.get("done") is float or event.get("done") is int) or not (event.get("total") is float or event.get("total") is int) or not event.get("stage") is String:
+			continue
+		latest = event
+	file.close()
+	if not latest.is_empty():
+		panel.show_export_progress(int(latest.done), int(latest.total), str(latest.stage))
+
+## 更新面板进度，并在工作进程结束时展示最终产物或错误。
 func _poll() -> void:
-	if FileAccess.file_exists(log_path):
-		var log := FileAccess.get_file_as_string(log_path)
-		var at := log.rfind("SCENE_PACKS_STAGE")
-		if at >= 0:
-			var details := log.substr(at).left(3000)
-			panel.show_message(details.get_slice("\n", 0).trim_prefix("SCENE_PACKS_STAGE").strip_edges(), details)
+	_read_export_progress()
 	if OS.is_process_running(pid):
 		return
 	poll.stop()
@@ -428,10 +528,13 @@ func _poll() -> void:
 	panel.set_busy(false)
 	var result: Variant = JSON.parse_string(FileAccess.get_file_as_string(result_path)) if FileAccess.file_exists(result_path) else null
 	if not result is Dictionary:
+		panel.finish_export_progress(false)
 		panel.show_message("导出进程异常结束。", "日志：" + log_path, true, true)
 	elif not result.ok:
+		panel.finish_export_progress(false)
 		panel.show_message("导出失败，请查看详细信息。", str(result.error), true, true)
 	else:
+		panel.finish_export_progress(true)
 		panel.show_export(result.manifest)
 		panel.show_message("导出完成 · %s 个压缩包。" % result.manifest.packs.size(), "输出目录：" + result.output + "\n包含 manifest.json 和 .pck.br，可按目录结构上传。", true)
 
@@ -439,6 +542,8 @@ func _exit_tree() -> void:
 	closing = true
 	if is_instance_valid(config_watch):
 		config_watch.stop()
+	if is_instance_valid(analysis_timer):
+		analysis_timer.stop()
 	remove_tool_menu_item("打开场景分包")
 	remove_control_from_bottom_panel(panel)
 	panel.queue_free()

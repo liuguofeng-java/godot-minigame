@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -11,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.stdout.reconfigure(encoding='utf-8')
 
 
-def verify(host, release, brotli, output, scene=None, transitions=None):
+def verify(host, release, brotli, output, scene=None, transitions=None, local_manifest_dev=False):
     host, release, output = Path(host).resolve(), Path(release).resolve(), Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
     flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
@@ -31,7 +32,13 @@ GameGlobal.GODOTSDK.startGame('/engine/godot', START_CONFIG, BrotliDecode)
 })
 .catch(error=>window.__result={ok:false,error:String(error.stack||error)});
 </script></body></html>'''
-    config = {'mode': 'manifest', 'engine_version': '4.7.2', 'manifest_url': 'https://scene-packs.test/game/manifest.json'}
+    build = json.loads((host / 'build-info.json').read_text(encoding='utf-8'))
+    version = re.search(r'\d+\.\d+\.\d+', build['engine_version'])
+    if not version:
+        raise RuntimeError('Host build has no Godot engine version')
+    config = {'mode': 'manifest', 'engine_version': version.group(), 'manifest_url': 'https://scene-packs.test/game/manifest.json'}
+    if local_manifest_dev:
+        config['local_dev'] = True
     if scene:
         config['scene'] = scene
     html = html.replace('START_CONFIG', json.dumps(config)).replace('SCENE_TRANSITIONS', json.dumps(transitions or []))
@@ -103,5 +110,6 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, default=ROOT / 'build/manifest-web-verification')
     parser.add_argument('--scene', help='Runtime startup scene override; export scope stays unchanged')
     parser.add_argument('--then-scene', action='append', default=[], help='Load another scene in the same engine after startup (repeatable)')
+    parser.add_argument('--local-manifest-dev', action='store_true', help='Exercise LAN development patch-version compatibility')
     args = parser.parse_args()
-    verify(args.host, args.release, args.brotli, args.output, args.scene, args.then_scene)
+    verify(args.host, args.release, args.brotli, args.output, args.scene, args.then_scene, args.local_manifest_dev)

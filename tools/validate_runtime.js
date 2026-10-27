@@ -21,9 +21,18 @@ function validateRuntime(directory) {
     assert(packMatch, "Invalid pack config module");
     const pack = JSON.parse(packMatch[1]);
     if (build.pack_mode === "manifest") {
-        assert(pack.mode === "manifest" && /^https:\/\/[^?#]+\.json$/.test(pack.manifest_url), "Invalid manifest URL");
+        let localHttp = false;
+        if (pack.local_dev === true && build.local_manifest_dev === true) {
+            const url = new URL(pack.manifest_url);
+            const parts = url.hostname.split(".").map(Number);
+            localHttp = url.protocol === "http:" && parts.length === 4 && parts.every(n => Number.isInteger(n) && n >= 0 && n <= 255) &&
+                (parts[0] === 10 || parts[0] === 127 || (parts[0] === 192 && parts[1] === 168) ||
+                    (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)) &&
+                !url.username && !url.password && !url.search && !url.hash && url.pathname.endsWith(".json");
+        }
+        assert(pack.mode === "manifest" && (localHttp || /^https:\/\/[^?#]+\.json$/.test(pack.manifest_url)), "Invalid manifest URL");
         assert(/^\d+\.\d+\.\d+$/.test(pack.engine_version), "Invalid manifest engine version");
-        assert(read("BUILD_STATUS.txt").includes("REMOTE MANIFEST"), "Missing manifest-mode notice");
+        assert(read("BUILD_STATUS.txt").includes(localHttp ? "LOCAL HTTP MANIFEST DEV ONLY" : "REMOTE MANIFEST"), "Missing manifest-mode notice");
     } else if (build.pack_mode === "remote") {
         assert(pack.mode === "remote" && pack.schema === 1, "Missing remote PCK config");
         assert(/^https:\/\/[^?#]+\.pck\.br$/.test(pack.url), "Invalid remote PCK URL");

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import importlib.util
 import json
 import os
@@ -360,12 +361,22 @@ class Pipeline:
         print(f'Remote config: {config_path}')
         return artifact, config_path
 
-    def package(self, source, output, remote_pack_config=None, bundled_pack_config=None, scene_pack_manifest=None, manifest_url=None):
+    def package(self, source, output, remote_pack_config=None, bundled_pack_config=None, scene_pack_manifest=None,
+                manifest_url=None, local_manifest_dev=False):
+        if local_manifest_dev and manifest_url is None:
+            raise RuntimeError('--local-manifest-dev requires --manifest-url.')
         if manifest_url is not None:
             parsed = urlsplit(manifest_url)
-            if (parsed.scheme != 'https' or not parsed.netloc or parsed.username or parsed.password
-                    or parsed.query or parsed.fragment or not parsed.path.endswith('.json')):
-                raise RuntimeError('Manifest URL must be a fixed HTTPS .json URL.')
+            try:
+                address = ipaddress.ip_address(parsed.hostname or '')
+                local_http = parsed.scheme == 'http' and address.version == 4 and address.is_private
+            except ValueError:
+                local_http = False
+            if (not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment
+                    or not parsed.path.endswith('.json') or
+                    (not local_manifest_dev and parsed.scheme != 'https') or
+                    (local_manifest_dev and not local_http)):
+                raise RuntimeError('Manifest URL must be fixed HTTPS, or a private IPv4 HTTP URL with --local-manifest-dev.')
             if remote_pack_config is not None or bundled_pack_config is not None or scene_pack_manifest is not None:
                 raise RuntimeError('Remote manifest mode cannot be combined with fixed PCK configurations.')
         if remote_pack_config is not None and bundled_pack_config is not None:
@@ -437,10 +448,12 @@ class Pipeline:
                 (host / 'engine/pack-config.js').write_text(
                     'export default ' + json.dumps(packed, ensure_ascii=False, indent=2) + ';\n', encoding='utf-8')
             elif manifest_url is not None:
+                manifest_config = {'mode': 'manifest', 'manifest_url': manifest_url,
+                                   'engine_version': '.'.join(map(str, engine_version(self.manifest['base_label'])))}
+                if local_manifest_dev:
+                    manifest_config['local_dev'] = True
                 (host / 'engine/pack-config.js').write_text(
-                    'export default ' + json.dumps({'mode': 'manifest', 'manifest_url': manifest_url,
-                        'engine_version': '.'.join(map(str, engine_version(self.manifest['base_label'])))},
-                        ensure_ascii=False, indent=2) + ';\n', encoding='utf-8')
+                    'export default ' + json.dumps(manifest_config, ensure_ascii=False, indent=2) + ';\n', encoding='utf-8')
             write_json(host / 'build-info.json', {
                 **build, 'engine_version': self.manifest['base_label'],
                 'emscripten_version': self.manifest['emscripten_version'],
@@ -449,9 +462,11 @@ class Pipeline:
                               'remote' if remote_pack_config is not None else 'local'),
                 'appid_configured': False,
                 'scene_packs': scene_packs is not None,
+                'local_manifest_dev': local_manifest_dev,
             })
             if manifest_url is not None:
-                note = ('REMOTE MANIFEST: upload the exported .pck.br files first, then manifest.json. '
+                note = (('LOCAL HTTP MANIFEST DEV ONLY: reachable on the same LAN; not for release. '
+                         if local_manifest_dev else 'REMOTE MANIFEST: upload the exported .pck.br files first, then manifest.json. ') +
                         'Configure your own Mini Game AppID before preview.\n')
             elif bundled_pack_config is not None:
                 note = ('BUNDLED BROTLI PCK: game resources are included in engine/demo-pck.br. '
@@ -487,7 +502,8 @@ def main():
             pack_group = cmd.add_mutually_exclusive_group()
             pack_group.add_argument('--remote-pack-config', type=Path)
             pack_group.add_argument('--bundled-pack-config', type=Path)
-            pack_group.add_argument('--manifest-url', help='HTTPS URL of a schema-2 scene pack manifest')
+            pack_group.add_argument('--manifest-url', help='HTTPS URL of a schema-2/3 scene pack manifest')
+            cmd.add_argument('--local-manifest-dev', action='store_true', help='Allow a private IPv4 HTTP manifest for LAN debugging only')
             cmd.add_argument('--scene-pack-manifest', type=Path)
         if name == 'pack-pck':
             cmd.add_argument('--pck', type=Path, required=True)
@@ -512,7 +528,7 @@ def main():
                              args.remote_pack_config.resolve() if args.remote_pack_config else None,
                              args.bundled_pack_config.resolve() if args.bundled_pack_config else None,
                              args.scene_pack_manifest.resolve() if args.scene_pack_manifest else None,
-                             args.manifest_url)
+                             args.manifest_url, args.local_manifest_dev)
     except (RuntimeError, OSError, ValueError, KeyError) as exc:
         print(f'Error: {exc}', file=sys.stderr)
         return 1

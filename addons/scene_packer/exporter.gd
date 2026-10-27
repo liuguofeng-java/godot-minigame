@@ -21,10 +21,8 @@ func export_project(config: Dictionary, output: String, brotli: String) -> Dicti
 		_remove_tree(workspace)
 	return result
 
+## 在隔离副本中执行完整导出，并按实际完成的阶段报告进度。
 func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
-	var engine_version := Engine.get_version_info()
-	if [engine_version.major, engine_version.minor, engine_version.patch] != [4, 7, 2]:
-		return {"ok": false, "error": "当前插件支持 Godot 4.7.2，请使用匹配版本导出。"}
 	var analysis: Dictionary = ANALYZER.new().analyze(config)
 	if not analysis.errors.is_empty():
 		return {"ok": false, "error": "\n".join(analysis.errors)}
@@ -39,6 +37,8 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 		brotli = "brotli"
 	if not _execute(brotli, ["--version"]):
 		return {"ok": false, "error": "找不到 Brotli，请设置可执行文件路径。\n" + error}
+	var total_steps: int = 6 + analysis.order.size() + 1 # 固定步骤和 bootstrap/业务包。
+	_emit_progress(0, total_steps, "正在复制项目")
 	source_root = ProjectSettings.globalize_path("res://").trim_suffix("/")
 	DirAccess.make_dir_recursive_absolute(output.get_base_dir())
 	workspace = output.get_base_dir().path_join(".scene-packer-%s-%s" % [OS.get_process_id(), Time.get_ticks_usec()])
@@ -55,6 +55,7 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 	print("SCENE_PACKS_STAGE 创建独立导出副本")
 	if not _copy_project(source_root, stage, output):
 		return {"ok": false, "error": error}
+	_emit_progress(1, total_steps, "正在准备导入")
 	var settings := ConfigFile.new()
 	if settings.load(stage.path_join("project.godot")) != OK:
 		return {"ok": false, "error": "无法读取项目配置。"}
@@ -104,15 +105,19 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 	import_settings.load(stage.path_join("project.godot"))
 	import_settings.erase_section("autoload")
 	import_settings.save(stage.path_join("project.godot"))
+	_emit_progress(1, total_steps, "正在导入资源（1/2）")
 	if not _execute(executable, ["--headless", "--path", stage, "--editor", "--import", "--quit"]):
 		return {"ok": false, "error": error}
+	_emit_progress(2, total_steps, "正在导入资源（2/2）")
 	settings.save(stage.path_join("project.godot"))
 	if not _execute(executable, ["--headless", "--path", stage, "--editor", "--import", "--quit"]):
 		return {"ok": false, "error": error}
+	_emit_progress(3, total_steps, "正在执行 Web 导出")
 	print("SCENE_PACKS_STAGE 官方 Web 导出")
 	var zip_path := workspace.path_join("export.zip")
 	if not _execute(executable, ["--headless", "--path", stage, "--export-pack", "Scene Packs", zip_path]):
 		return {"ok": false, "error": error}
+	_emit_progress(4, total_steps, "正在整理导出文件")
 	var zip := ZIPReader.new()
 	if zip.open(zip_path) != OK:
 		return {"ok": false, "error": "无法读取官方导出 ZIP。"}
@@ -186,6 +191,7 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 	isolated_config.store_string("config_version=5\n")
 	isolated_config.close()
 	print("SCENE_PACKS_STAGE 固定导出场景节点标识")
+	_emit_progress(4, total_steps, "正在规范化场景")
 	if not _execute(executable, ["--headless", "--path", extracted, "--script", source_root.path_join("addons/scene_packer/normalize_scenes.gd"), "--", normalization]):
 		return {"ok": false, "error": error}
 	var version := Engine.get_version_info()
@@ -195,6 +201,8 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 		"scene_to_pack": analysis.scene_to_pack, "packs": {}}
 	var pack_ids: Array = buckets.keys()
 	pack_ids.sort()
+	_emit_progress(5, total_steps, "正在打包（0/%s）" % pack_ids.size())
+	var completed_packs := 0
 	for id: String in pack_ids:
 		print("SCENE_PACKS_STAGE 打包与 Brotli 压缩：", id)
 		var pck := workspace.path_join(id + ".pck")
@@ -222,6 +230,8 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 			"pck_sha256": FileAccess.get_sha256(pck), "pck_size": FileAccess.open(pck, FileAccess.READ).get_length(),
 			"depends": analysis.bootstrap_depends if id == "bootstrap" else analysis.depends[id],
 			"files": [] if id == "bootstrap" else analysis.packs[id], "archive_files": buckets[id]}
+		completed_packs += 1
+		_emit_progress(5 + completed_packs, total_steps, "正在打包（%s/%s）" % [completed_packs, pack_ids.size()] if completed_packs < pack_ids.size() else "正在生成清单")
 	for path: String in snapshots:
 		if FileAccess.get_sha256(path) != snapshots[path]:
 			return {"ok": false, "error": "导出期间源文件发生变化，请重新导出：" + path}
@@ -233,6 +243,10 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 		return {"ok": false, "error": "无法发布输出目录：" + output}
 	print("SCENE_PACKS_EXPORTED ", output)
 	return {"ok": true, "output": output, "manifest": manifest}
+
+## 向编辑器发送已完成步骤；同一步骤可更新当前阶段而不虚增进度。
+func _emit_progress(done: int, total: int, stage: String) -> void:
+	print("SCENE_PACKS_PROGRESS " + JSON.stringify({"done": done, "total": total, "stage": stage}))
 
 func _execute(executable: String, arguments: PackedStringArray) -> bool:
 	var captured: Array = []

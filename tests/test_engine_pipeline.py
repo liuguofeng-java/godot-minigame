@@ -127,6 +127,16 @@ class PipelineTest(unittest.TestCase):
                               manifest_url='https://cdn.example/manifest.json')
         with self.assertRaisesRegex(RuntimeError, 'HTTPS'):
             self.pipe.package(self.source, output, manifest_url='http://cdn.example/manifest.json')
+        local_output = Path(self.tmp.name) / 'local-manifest-host'
+        self.pipe.package(self.source, local_output,
+                          manifest_url='http://10.198.46.142:9000/manifest.json', local_manifest_dev=True)
+        local_config = (local_output / 'engine/pack-config.js').read_text()
+        self.assertIn('"local_dev": true', local_config)
+        self.assertIn('"engine_version": "4.7.2"', local_config)
+        self.assertIn('LOCAL HTTP MANIFEST DEV ONLY', (local_output / 'BUILD_STATUS.txt').read_text())
+        with self.assertRaisesRegex(RuntimeError, 'private IPv4'):
+            self.pipe.package(self.source, Path(self.tmp.name) / 'public-http',
+                              manifest_url='http://cdn.example/manifest.json', local_manifest_dev=True)
 
     def fake_build(self):
         self.pipe.apply(self.source)

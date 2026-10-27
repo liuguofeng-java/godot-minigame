@@ -20,6 +20,7 @@ func _run() -> void:
 	if panel == null:
 		push_error("Scene pack plugin was not enabled"); get_tree().quit(1); return
 	var plugin = panel.add_button.pressed.get_connections()[0].callable.get_object()
+	_verify_progress_log(plugin, panel)
 	panel.pack_name.text = "new_pack"
 	panel.add_button.pressed.emit()
 	if plugin.current != "new_pack" or not plugin.config.packs.has("new_pack"):
@@ -45,6 +46,7 @@ func _run() -> void:
 	if saved.packs.size() != 2:
 		push_error("Saved configuration changed unexpectedly"); get_tree().quit(1); return
 	await _verify_tree(plugin, panel)
+	await _verify_ownership(plugin, panel)
 	_write_config(saved)
 	plugin._reload_config()
 	# Reproduce the reported bug: a loaded cyclic config is fixed on disk, then
@@ -107,6 +109,29 @@ func _run() -> void:
 	print("SCENE_PACKER_EDITOR_ACTIONS_VERIFIED")
 	get_tree().quit()
 
+## 检查增量日志读取，未写完的进度事件必须留到下一次轮询。
+func _verify_progress_log(plugin, panel) -> void:
+	plugin.log_path = ProjectSettings.globalize_path("user://scene-packer-progress-check.log")
+	plugin.log_offset = 0
+	panel.start_export_progress(9)
+	var file := FileAccess.open(plugin.log_path, FileAccess.WRITE)
+	file.store_string("普通日志\nSCENE_PACKS_PROGRESS {\"done\":4,")
+	file.close()
+	plugin._read_export_progress()
+	assert(panel.progress_bar.value == 0, "Incomplete progress line was accepted")
+	file = FileAccess.open(plugin.log_path, FileAccess.READ_WRITE)
+	file.seek_end()
+	file.store_string("\"total\":9,\"stage\":\"正在整理导出文件\"}\n")
+	file.store_string("SCENE_PACKS_PROGRESS {\"done\":5,\"total\":9,\"stage\":\"正在打包\"}\n")
+	file.close()
+	plugin._read_export_progress()
+	assert(panel.progress_bar.value == 5 and panel.progress_count.text == "5/9 步")
+	assert(panel.progress_label.text == "正在打包")
+	var consumed: int = plugin.log_offset
+	plugin._read_export_progress()
+	assert(plugin.log_offset == consumed, "Unchanged log was parsed again")
+	DirAccess.remove_absolute(plugin.log_path)
+
 func _write_config(value: Dictionary) -> void:
 	var file := FileAccess.open("res://scene_packs.json", FileAccess.WRITE)
 	file.store_string(JSON.stringify(value, "\t", true, false) + "\n")
@@ -126,6 +151,14 @@ func _item(tree: Tree, path: String, parent: TreeItem = null) -> TreeItem:
 func _frames() -> void:
 	for frame in 4:
 		await get_tree().process_frame
+
+## 等待合并后的后台时序分析完成，再检查报告内容。
+func _wait_analysis(plugin) -> void:
+	for attempt in 30:
+		if not plugin.analysis_queued:
+			return
+		await get_tree().create_timer(0.05).timeout
+	assert(false, "Live analysis did not finish")
 
 func _click(tree: Tree, path: String) -> void:
 	var item := _item(tree, path)
@@ -159,7 +192,9 @@ func _verify_tree(plugin, panel) -> void:
 	assert(plugin.current == "a")
 	assert(_item(panel.tree, "res://a").is_checked(0))
 	assert(_item(panel.tree, "res://a/nested/one.txt").is_editable(0))
+	var original_item := _item(panel.tree, "res://a/nested/one.txt")
 	await _click(panel.tree, "res://a/nested/one.txt")
+	assert(_item(panel.tree, "res://a/nested/one.txt") == original_item, "Checking one file rebuilt the entire tree")
 	assert(not _item(panel.tree, "res://a/nested/one.txt").is_checked(0), "Child mouse click was not saved")
 	assert(_item(panel.tree, "res://a/nested").is_indeterminate(0))
 	assert(_item(panel.tree, "res://a").is_indeterminate(0))
@@ -167,6 +202,7 @@ func _verify_tree(plugin, panel) -> void:
 	assert(panel.resource_title.text.contains("2"), "Selected-file count is stale")
 	assert(panel.packs.get_item_text(0) == "a · 2")
 	assert(panel.tabs.current_tab == 0, "Live analysis switched tabs")
+	await _wait_analysis(plugin)
 	var row: TreeItem = panel.report.get_root().get_first_child()
 	while row != null and row.get_text(0) != "a":
 		row = row.get_next()
@@ -202,17 +238,64 @@ func _verify_tree(plugin, panel) -> void:
 	await _click(panel.tree, "res://a")
 	assert(not _item(panel.tree, "res://a/nested/two.txt").is_checked(0))
 	assert(plugin.config.packs.a.paths.is_empty())
+	await _wait_analysis(plugin)
 	assert(panel.notice.text.contains("问题"), "Missing entry ownership did not update validation")
 	await _click(panel.tree, "res://a")
+	await _wait_analysis(plugin)
 	assert(panel.notice.text.contains("验证通过"), "Restored selection left stale validation errors")
 	panel.tabs.current_tab = 1
 	panel.depends.text = "missing_pack"
 	panel.depends.text_submitted.emit(panel.depends.text)
-	await _frames()
+	await _wait_analysis(plugin)
 	assert(panel.notice.text.contains("问题") and panel.status.text.contains("missing_pack"))
 	assert(panel.tabs.current_tab == 1)
 	panel.depends.text = "b"
 	panel.depends.text_submitted.emit(panel.depends.text)
-	await _frames()
+	await _wait_analysis(plugin)
 	assert(panel.notice.text.contains("验证通过"))
 	print("SCENE_PACKER_MOUSE_SELECTION_AND_LIVE_ANALYSIS_VERIFIED")
+
+## 验证跨包占用、筛选和已有重复归属的可修复交互。
+func _verify_ownership(plugin, panel) -> void:
+	plugin.make_bottom_panel_item_visible(panel)
+	panel.tabs.current_tab = 0
+	await _frames()
+	plugin.config.packs.a = {"paths": ["res://a/nested/one.txt"], "depends": []}
+	plugin.config.packs.b = {"paths": ["res://b"], "depends": []}
+	plugin.current = "b"
+	plugin._refresh_packs()
+	assert(not _item(panel.tree, "res://a/nested").is_editable(0), "Mixed directory checkbox must be disabled")
+	assert(not _item(panel.tree, "res://a/nested/one.txt").is_editable(0), "Owned file checkbox must be disabled")
+	assert(_item(panel.tree, "res://a/nested/two.txt").is_editable(0), "Unowned child must remain selectable")
+	assert(_item(panel.tree, "res://a/nested").get_tooltip_text(0).contains("已归属 a"))
+	plugin._set_resource_checked("res://a/nested", true, "b")
+	plugin._set_resource_checked("res://a/nested/one.txt", true, "b")
+	assert(not plugin.SELECTION.selected(plugin.config.packs.b, "res://a/nested/one.txt"), "Deferred edit bypassed the ownership guard")
+	panel.search.text = "two.txt"
+	panel.search.text_changed.emit(panel.search.text)
+	assert(not _item(panel.tree, "res://a/nested").is_editable(0), "Hidden owner must still disable the directory")
+	assert(_item(panel.tree, "res://a/nested/two.txt").is_editable(0))
+	panel.search.text = ""
+	panel.search.text_changed.emit("")
+	await _click(panel.tree, "res://a/nested/two.txt")
+	assert(plugin.SELECTION.selected(plugin.config.packs.b, "res://a/nested/two.txt"))
+	var switched_item := _item(panel.tree, "res://a/nested/one.txt")
+	plugin._select_pack(0)
+	assert(_item(panel.tree, "res://a/nested/one.txt") == switched_item, "Switching packs rebuilt the entire tree")
+	assert(_item(panel.tree, "res://a/nested/one.txt").is_editable(0), "Current owner's file must remain removable")
+	assert(not _item(panel.tree, "res://a/nested/two.txt").is_editable(0), "Switching packs must update disabled rows")
+	plugin.config.packs.a = {"paths": ["res://a"], "depends": []}
+	plugin.config.packs.b = {"paths": ["res://b"], "depends": []}
+	plugin.current = "b"
+	plugin._refresh_packs()
+	assert(not _item(panel.tree, "res://a").is_editable(0), "Fully occupied directory must be disabled")
+	plugin.config.packs.b.paths.append("res://a/nested/one.txt")
+	plugin._refresh_tree()
+	assert(_item(panel.tree, "res://a/nested/one.txt").is_editable(0), "Existing overlap must be removable")
+	plugin._set_resource_checked("res://a/nested/one.txt", false, "b")
+	assert(not plugin.SELECTION.selected(plugin.config.packs.b, "res://a/nested/one.txt"))
+	plugin.current = "a"
+	plugin._refresh_packs()
+	plugin._delete_pack()
+	assert(_item(panel.tree, "res://a").is_editable(0), "Deleting the owner must enable the directory")
+	print("SCENE_PACKER_EXCLUSIVE_SELECTION_VERIFIED")

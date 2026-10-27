@@ -40,6 +40,22 @@ func verify() -> void:
 		panel.show_message("发现 1 项问题", "res://a.tscn → res://missing.png：未分配到包。", true, true)
 		if panel.tabs.current_tab != 2 or panel.report.get_root().get_child_count() != 1:
 			push_error("Analysis results were not shown"); quit(1); return
+		panel.start_export_progress(9)
+		panel.show_export_progress(4, 9, "正在整理导出文件")
+		if not panel.progress_row.visible or panel.progress_bar.value != 4 or panel.progress_count.text != "4/9 步":
+			push_error("Export progress was not shown"); quit(1); return
+		panel.finish_export_progress(false)
+		if panel.progress_bar.value != 4 or panel.progress_label.text != "导出中断":
+			push_error("Failed export lost its last completed step"); quit(1); return
+		panel.start_export_progress(8)
+		if panel.progress_bar.value != 0 or panel.progress_count.text != "0/8 步":
+			push_error("New export kept stale progress"); quit(1); return
+		panel.finish_export_progress(true)
+		if panel.progress_bar.value != 8 or panel.progress_label.text != "导出完成":
+			push_error("Completed export did not fill progress"); quit(1); return
+		panel.show_analysis({"order": ["a"], "packs": {"a": ["res://a.tscn"]}, "sizes": {"a": 1024}, "depends": {"a": []}})
+		if panel.progress_row.visible:
+			push_error("Analysis left the old export progress visible"); quit(1); return
 		panel.set_busy(true)
 		if not panel.export_button.disabled or not panel.analyze_button.disabled:
 			push_error("Export controls are not locked while running"); quit(1); return

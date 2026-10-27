@@ -23,6 +23,13 @@ func _initialize() -> void:
 	assert(index.counts == {"a": 2, "b": 1})
 	groups.b.paths.append("res://assets/new.png")
 	assert(RULES.index(files, groups, "a").nodes["res://assets"].conflicts == 1)
+	var blocked: Dictionary = RULES.index(files, groups, "b")
+	assert(RULES.foreign_owners(blocked.nodes["res://assets"], "b") == ["a"])
+	assert(not RULES.can_toggle(blocked.nodes["res://assets"], "b", false, true), "Mixed directory must be disabled")
+	assert(not RULES.can_toggle(blocked.nodes["res://assets/nested/a.png"], "b", true, true), "Other package's file must be disabled")
+	assert(RULES.can_toggle(blocked.nodes["res://assets/nested/b.png"], "b", true, false), "Current package's file remains removable")
+	assert(RULES.can_toggle(blocked.nodes["res://assets/new.png"], "b", true, false), "Existing overlap must be removable")
+	assert(not RULES.can_toggle(blocked.nodes["res://assets/new.png"], "b", true, true), "Existing overlap cannot be selected again")
 	definition = RULES.toggle(definition, "res://assets", false)
 	for file: String in files:
 		assert(not RULES.selected(definition, file), "Parent uncheck must remove child overrides")

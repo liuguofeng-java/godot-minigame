@@ -9,7 +9,10 @@ var errors: Array[String] = []
 var owners: Dictionary = {}
 var members: Dictionary = {}
 var graph: Dictionary = {}
+## 同一分析器实例内缓存资源依赖及其源文件签名，供连续面板更新复用。
 var dependencies: Dictionary = {}
+## 资源路径对应的修改时间或文本内容哈希。
+var dependency_signatures: Dictionary = {}
 var classes: Dictionary = {}
 var files: Array[String] = []
 var extra: Dictionary = {}
@@ -41,11 +44,12 @@ func _editor_plugin_resource(path: String) -> bool:
 	return false
 
 func analyze(config: Dictionary) -> Dictionary:
+	var previous_files := files
+	var previous_classes := classes.duplicate()
 	errors.clear()
 	owners.clear()
 	members.clear()
 	graph.clear()
-	dependencies.clear()
 	classes.clear()
 	extra.clear()
 	traces.clear()
@@ -53,6 +57,10 @@ func analyze(config: Dictionary) -> Dictionary:
 	files = scan()
 	for item: Dictionary in ProjectSettings.get_global_class_list():
 		classes[str(item["class"])] = str(item["path"])
+	# 文件增删或全局类变化会影响未修改脚本中的隐式引用。
+	if files != previous_files or classes != previous_classes:
+		dependencies.clear()
+		dependency_signatures.clear()
 	var pattern := RegEx.create_from_string("^[a-z][a-z0-9_-]{0,47}$")
 	var groups: Variant = config.get("packs", {})
 	if not groups is Dictionary or groups.is_empty():
@@ -191,7 +199,11 @@ func _resolve(path: String) -> String:
 	return path
 
 func _dependencies(path: String) -> Array[String]:
-	if dependencies.has(path):
+	var signature := str(FileAccess.get_modified_time(path))
+	if path.ends_with(".gd") or path.ends_with(".gdshader") or path.ends_with(".gdshaderinc") or path.ends_with(".tscn") or path.ends_with(".tres"):
+		# 同一秒内保存文本资源时，内容哈希仍可识别依赖变化。
+		signature += ":" + FileAccess.get_sha256(path)
+	if dependencies.has(path) and dependency_signatures.get(path, "") == signature:
 		return dependencies[path]
 	var result: Array[String] = []
 	if ResourceLoader.exists(path):
@@ -230,6 +242,7 @@ func _dependencies(path: String) -> Array[String]:
 				result.append(classes[name])
 	result.sort()
 	dependencies[path] = result
+	dependency_signatures[path] = signature
 	return result
 
 func _dynamic_suffix(tail: String) -> bool:

@@ -1,4 +1,4 @@
-"""Real Godot export/pack verification; needs Godot 4.7.2 and Brotli, no Python packages."""
+"""Real Godot export/pack verification; needs matching Web export templates and Brotli."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
@@ -189,9 +189,19 @@ func _initialize() -> void:
     print(run([godot, '--headless', '--path', project, '--script', 'res://check.gd'], project))
     def export(name):
         output = root / name
-        print(run([godot, '--headless', '--path', project, '--script', 'res://addons/scene_packer/export_job.gd',
-            '--', '--config', project / 'scene_packs.json', '--output', output, '--brotli', brotli], project))
-        return json.loads((output / 'manifest.json').read_text()), output
+        log = run([godot, '--headless', '--path', project, '--script', 'res://addons/scene_packer/export_job.gd',
+            '--', '--config', project / 'scene_packs.json', '--output', output, '--brotli', brotli], project)
+        print(log)
+        manifest = json.loads((output / 'manifest.json').read_text())
+        events = [json.loads(line.partition('SCENE_PACKS_PROGRESS ')[2]) for line in log.splitlines()
+            if 'SCENE_PACKS_PROGRESS ' in line]
+        total = 6 + len(manifest['packs'])
+        assert events and events[0]['done'] == 0 and events[-1] == {
+            'done': total, 'total': total, 'stage': '导出完成'}, 'Export progress boundaries are wrong'
+        assert all(event['total'] == total and isinstance(event['stage'], str) for event in events)
+        assert [event['done'] for event in events] == sorted(event['done'] for event in events)
+        assert set(range(total + 1)) <= {event['done'] for event in events}, 'A completed export step was skipped'
+        return manifest, output
     # Independent export copies must also isolate Godot's fixed-name temporary ZIP data.
     with ThreadPoolExecutor(max_workers=2) as pool:
         first_run = pool.submit(export, 'first')

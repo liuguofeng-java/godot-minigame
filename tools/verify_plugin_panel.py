@@ -46,6 +46,8 @@ def verify(godot, preview_dir=None):
             'packs': {'a': {'paths': ['res://a'], 'depends': ['b']}, 'b': {'paths': ['res://b'], 'depends': []}}}))
         run(godot, project, ['--editor'], 'SCENE_PACKER_EDITOR_ACTIONS_VERIFIED')
         run(godot, project, ['--script', 'res://check.gd'], 'SCENE_PACKER_PANEL_VERIFIED')
+        shutil.copyfile(ROOT / 'tests/fixtures/check_dependency_cache.gd', project / 'cache_check.gd')
+        run(godot, project, ['--script', 'res://cache_check.gd'], 'SCENE_PACKER_DEPENDENCY_CACHE_VERIFIED')
         if preview_dir:
             preview_dir.mkdir(parents=True, exist_ok=False)
             shutil.copyfile(project / 'preview_theme.res', preview_dir / 'preview_theme.res')

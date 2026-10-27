@@ -67,3 +67,21 @@ static func index(files: Array[String], groups: Dictionary, active: String) -> D
 			for id: String in owners:
 				state.owners[id] = int(state.owners.get(id, 0)) + 1
 	return {"nodes": nodes, "counts": counts}
+
+## 返回当前包以外已选中该文件或目录内文件的资源包。
+static func foreign_owners(state: Dictionary, active: String) -> Array[String]:
+	var result: Array[String] = []
+	var owners: Dictionary = state.get("owners", {})
+	for id: String in owners:
+		if id != active:
+			result.append(id)
+	result.sort()
+	return result
+
+## 目录含外包资源时禁止整目录操作；重复归属的单文件只允许从当前包取消。
+static func can_toggle(state: Dictionary, active: String, is_file: bool, checked: bool) -> bool:
+	if active.is_empty():
+		return false
+	if foreign_owners(state, active).is_empty():
+		return true
+	return is_file and not checked and int(state.get("selected", 0)) == int(state.get("total", 0))

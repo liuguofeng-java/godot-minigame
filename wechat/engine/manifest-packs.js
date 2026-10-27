@@ -34,9 +34,22 @@
     function https(url) {
         return typeof url === "string" && /^https:\/\/[^/?#@\s]+\/[^?#\s]*$/.test(url);
     }
-    function validate(manifest, engineVersion) {
+    function privateHttp(url) {
+        if (typeof url !== "string") return false;
+        const match = /^http:\/\/((?:10|127)(?:\.\d{1,3}){3}|(?:192\.168|172\.(?:1[6-9]|2\d|3[01]))(?:\.\d{1,3}){2})(?::(\d{1,5}))?\/[^?#\s]*$/.exec(url);
+        if (!match || match[1].split(".").some(part => Number(part) > 255)) return false;
+        return !match[2] || (Number(match[2]) > 0 && Number(match[2]) <= 65535);
+    }
+    function compatibleVersion(packVersion, engineVersion, localDev) {
+        if (packVersion === engineVersion) return true;
+        if (!localDev || !/^\d+\.\d+\.\d+$/.test(packVersion) || !/^\d+\.\d+\.\d+$/.test(engineVersion)) return false;
+        const pack = packVersion.split(".").map(Number), engine = engineVersion.split(".").map(Number);
+        // Godot accepts older patch-level PCKs within the same major/minor line.
+        return pack[0] === engine[0] && pack[1] === engine[1] && pack[2] <= engine[2];
+    }
+    function validate(manifest, engineVersion, localDev = false) {
         if (!manifest || ![2, 3].includes(manifest.schema) || typeof manifest.project_id !== "string" || !manifest.project_id ||
-            manifest.engine_version !== engineVersion || !HASH.test(manifest.release_id) ||
+            !compatibleVersion(manifest.engine_version, engineVersion, localDev) || !HASH.test(manifest.release_id) ||
             manifest.bootstrap !== "bootstrap" || !manifest.packs || Array.isArray(manifest.packs) ||
             !manifest.scene_to_pack || Array.isArray(manifest.scene_to_pack) ||
             (manifest.schema === 2 ? typeof manifest.entry_scene !== "string" : typeof manifest.project_scene !== "string")) throw new Error("Invalid scene manifest/version");
@@ -208,18 +221,19 @@
         return session;
     }
     async function prepare(config, decoder, callback) {
-        if (!config || !https(config.manifest_url) || !/^\d+\.\d+\.\d+$/.test(config.engine_version)) throw new Error("Invalid manifest startup config");
+        if (!config || !(https(config.manifest_url) || (config.local_dev === true && privateHttp(config.manifest_url))) ||
+            !/^\d+\.\d+\.\d+$/.test(config.engine_version)) throw new Error("Invalid manifest startup config");
         const directory = wx.env.USER_DATA_PATH + "/scene-packs-" + hashText(config.manifest_url).slice(0, 24);
         await io("mkdir", { dirPath: directory, recursive: true }).catch(() => {});
         let previous = null;
         try {
             const saved = await io("readFile", { filePath: directory + "/successful.json", encoding: "utf8" });
-            previous = validate(JSON.parse(saved.data), config.engine_version);
+            previous = validate(JSON.parse(saved.data), config.engine_version, config.local_dev === true);
         } catch (_) { /* No trusted successful release yet. */ }
         const base = config.manifest_url.slice(0, config.manifest_url.lastIndexOf("/") + 1);
         try {
             notify(callback, "manifest", "", 0);
-            const manifest = validate(await request(config.manifest_url), config.engine_version);
+            const manifest = validate(await request(config.manifest_url), config.engine_version, config.local_dev === true);
             if (previous && manifest.project_id !== previous.project_id) throw new Error("Manifest project identity changed");
             return await obtain({ manifest, previous, directory, base, fallback: false }, decoder, false, callback, config.scene);
         } catch (error) {

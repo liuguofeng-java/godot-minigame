@@ -11,13 +11,13 @@ function canonical(v) {
     if (v && typeof v === "object") return "{" + Object.keys(v).sort().map(k => JSON.stringify(k) + ":" + canonical(v[k])).join(",") + "}";
     return JSON.stringify(v);
 }
-function release(version = "one") {
-    const manifest = { schema: 2, project_id: "测试项目", engine_version: "4.7.2", bootstrap: "bootstrap",
+function release(version = "one", patch = 2) {
+    const manifest = { schema: 2, project_id: "测试项目", engine_version: `4.7.${patch}`, bootstrap: "bootstrap",
         entry_scene: "res://a/A.tscn", scene_to_pack: { "res://a/A.tscn": "a" }, packs: {} };
     const files = new Map();
     for (const id of ["bootstrap", "a", "b", "c", "x"]) {
         const header = Buffer.alloc(20); header.write("GDPC");
-        [4, 4, 7, 2].forEach((v, i) => header.writeUInt32LE(v, 4 + i * 4));
+        [4, 4, 7, patch].forEach((v, i) => header.writeUInt32LE(v, 4 + i * 4));
         const pck = Buffer.concat([header, Buffer.from(id + (id === "b" ? version : "stable"))]);
         const br = zlib.brotliCompressSync(pck);
         const url = `packs/${id}-${hash(br)}.pck.br`;
@@ -84,6 +84,20 @@ function harness(saved = new Map()) {
 }
 async function tests() {
     await catalogTests();
+    const lan = harness(), localRelease = release("lan", 0);
+    lan.use(localRelease);
+    lan.network = new Map([...localRelease.files].map(([url, bytes]) =>
+        [url.replace("https://cdn.example/game/", "http://10.198.46.142:9000/"), bytes]));
+    const localConfig = { mode: "manifest", manifest_url: "http://10.198.46.142:9000/manifest.json",
+        engine_version: "4.7.2" };
+    await assert.rejects(lan.api.prepare(localConfig, lan.decoder), /Invalid manifest startup config/);
+    const localSession = await lan.api.prepare({ ...localConfig, local_dev: true }, lan.decoder);
+    assert.equal(localSession.manifest.engine_version, "4.7.0");
+    assert.equal(lan.downloads.length, 4);
+    assert.throws(() => lan.api.validate(localRelease.manifest, "4.7.2"), /version/);
+    assert.throws(() => lan.api.validate(localRelease.manifest, "4.8.2", true), /version/);
+    await assert.rejects(lan.api.prepare({ ...localConfig, local_dev: true,
+        manifest_url: "http://cdn.example/manifest.json" }, lan.decoder), /Invalid manifest startup config/);
     const standalone = release();
     standalone.manifest.entry_scene = "res://x/X.tscn";
     standalone.manifest.scene_to_pack["res://x/X.tscn"] = "x";
