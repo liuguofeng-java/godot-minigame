@@ -162,7 +162,42 @@
         }
         const config = typeof pack === "string" ? { mode: "local", path: pack } : pack;
         try {
-            if (config && config.mode === "remote") {
+            if (config && config.mode === "manifest") {
+                if (root.Engine.scenePackProtocol !== 2) throw new Error("场景分包需要重新编译支持 --extra-pack 的引擎");
+                const runtime = gameGlobal.manifestPacks;
+                if (!runtime) throw new Error("Manifest runtime is not available");
+                const progress = ({ stage, pack, percent }) => {
+                    const labels = { manifest: "正在获取资源清单", download: "正在下载", verify: "正在校验压缩包", decode: "正在解压和校验资源" };
+                    if (loader && loader.updateProgress) loader.updateProgress(
+                        stage === "manifest" ? 0.5 : stage === "download" ? 0.5 + percent * 0.003 : 0.85,
+                        (labels[stage] || stage) + (pack ? "：" + pack : ""));
+                };
+                const session = await runtime.prepare(config, decodeBr, progress);
+                const engine = new root.Engine({ canvas: getCanvas() });
+                gameGlobal.GODOTSDK.engine = engine;
+                await engine.init(executable);
+                const paths = await runtime.install(session, decodeBr,
+                    (path, bytes) => gameGlobal.GODOTSDK.copy_to_fs(path, bytes), progress);
+                const args = ["--main-pack", paths.main];
+                paths.extra.forEach(path => args.push("--extra-pack", path));
+                // Web templates disable scene-path command-line overrides. Godot's
+                // standard settings override beside the main pack selects this run only.
+                if (config.scene) gameGlobal.GODOTSDK.copy_to_fs("/scene-packs/override.cfg", runtime.startupOverride(session));
+                if (loader && loader.updateProgress) loader.updateProgress(0.95, "正在启动场景");
+                const ready = runtime.waitForScene(session.scene);
+                const started = Promise.all([Promise.resolve().then(() => engine.start({ args })), ready])
+                    .then(() => runtime.commit(session));
+                // Scene scripts may request another scene during _ready; queue it until
+                // this initial launch succeeds instead of rejecting a valid early request.
+                runtime.activate(session, decodeBr, (path, bytes) => gameGlobal.GODOTSDK.copy_to_fs(path, bytes), started);
+                // Attach the readiness rejection handler immediately, including synchronous start failures.
+                try {
+                    await started;
+                } catch (error) {
+                    runtime.cancelWait(error);
+                    throw error;
+                }
+            } else if (config && config.mode === "remote") {
                 const remote = gameGlobal.remotePack;
                 if (!remote) throw new Error("Remote PCK runtime is not available");
                 if (loader && typeof loader.updateProgress === "function") {
@@ -232,6 +267,10 @@
     const GODOTSDK = gameGlobal.GODOTSDK || {};
     GODOTSDK.audio = audio;
     GODOTSDK.startGame = startGame;
+    GODOTSDK.loadScene = function (scene, onProgress) {
+        if (!gameGlobal.manifestPacks) return Promise.reject(new Error("Manifest runtime is not available"));
+        return gameGlobal.manifestPacks.loadScene(scene, onProgress);
+    };
     GODOTSDK.copy_to_fs = function (path, buffer) {
         const engine = GODOTSDK.engine;
         if (!engine || !engine.rtenv || typeof engine.rtenv.copyToFS !== "function") {

@@ -6,7 +6,8 @@
   "emscripten_version": "4.0.11",
   "patches": [
     "001-build-and-runtime-glue.patch",
-    "002-native-audio-routing.patch"
+    "002-native-audio-routing.patch",
+    "003-startup-scene-packs.patch"
   ],
   "build_options": {
     "platform": "web",

@@ -1,0 +1,94 @@
+diff --git a/main/main.cpp b/main/main.cpp
+--- a/main/main.cpp
++++ b/main/main.cpp
+@@ -577,6 +577,7 @@
+ 	print_help_option("--scene <path>", "Path or UID of a scene in the project that should be started.\n", CLI_OPTION_AVAILABILITY_TEMPLATE_UNSAFE);
+ #endif // defined(OVERRIDE_PATH_ENABLED)
+ #if defined(OVERRIDE_PATH_ENABLED) || defined(ANDROID_ENABLED) || defined(WEB_ENABLED)
++	print_help_option("--extra-pack <file>", "Mount an additional PCK before project initialization (repeatable).\n", CLI_OPTION_AVAILABILITY_TEMPLATE_UNSAFE);
+ 	print_help_option("--main-pack <file>", "Path to a pack (.pck) file to load.\n", CLI_OPTION_AVAILABILITY_TEMPLATE_UNSAFE);
+ #endif // defined(OVERRIDE_PATH_ENABLED) || defined(ANDROID_ENABLED) || defined(WEB_ENABLED)
+ 
+@@ -1120,6 +1121,7 @@
+ 	bool skip_breakpoints = false;
+ 	bool ignore_error_breaks = false;
+ 	String main_pack;
++	Vector<String> extra_packs;
+ 	bool quiet_stdout = false;
+ 	int separate_thread_render = -1; // Tri-state: -1 = not set, 0 = false, 1 = true.
+ 
+@@ -1861,6 +1863,18 @@
+ 				OS::get_singleton()->print("Missing time scale argument, aborting.\n");
+ 				goto error;
+ 			}
++		} else if (arg == "--extra-pack") {
++#if defined(OVERRIDE_PATH_ENABLED) || defined(WEB_ENABLED)
++			if (!N || N->get().begins_with("--")) {
++				OS::get_singleton()->print("Missing --extra-pack path, aborting.\n");
++				goto error;
++			}
++			extra_packs.push_back(N->get());
++			N = N->next();
++#else
++			ERR_PRINT("--extra-pack requires path overrides or Web support.");
++			goto error;
++#endif
+ 		} else if (arg == "--main-pack") {
+ // Note: main-pack is always used on web and can't be disabled.
+ // Note: main-pack can be used on Android so long as it's located within the 'assets' directory which is in the executable.
+@@ -2103,6 +2117,11 @@
+ 	}
+ #endif // defined(DEBUG_ENABLED) || defined (TOOLS_ENABLED)
+ 
++	if (!extra_packs.is_empty() && main_pack.is_empty()) {
++		ERR_PRINT("--extra-pack requires --main-pack.");
++		goto error;
++	}
++	globals->set_startup_packs(extra_packs);
+ 	OS::get_singleton()->_in_editor = editor;
+ 	if (globals->setup(project_path, main_pack, false, editor) == OK) {
+ #ifdef TOOLS_ENABLED
+diff --git a/core/config/project_settings.h b/core/config/project_settings.h
+--- a/core/config/project_settings.h
++++ b/core/config/project_settings.h
+@@ -117,6 +117,7 @@
+ 	bool is_global_class_list_loaded = false;
+ 
+ 	String project_data_dir_name;
++	Vector<String> startup_packs;
+ 
+ 	bool _set(const StringName &p_name, const Variant &p_value);
+ 	bool _get(const StringName &p_name, Variant &r_ret) const;
+@@ -196,6 +197,7 @@
+ 	void set_builtin_order(const String &p_name);
+ 	bool is_builtin_setting(const String &p_name) const;
+ 
++	void set_startup_packs(const Vector<String> &p_packs) { startup_packs = p_packs; }
+ 	Error setup(const String &p_path, const String &p_main_pack, bool p_upwards = false, bool p_ignore_override = false);
+ 
+ 	Error load_custom(const String &p_path);
+diff --git a/core/config/project_settings.cpp b/core/config/project_settings.cpp
+--- a/core/config/project_settings.cpp
++++ b/core/config/project_settings.cpp
+@@ -690,6 +690,10 @@
+ 		bool ok = _load_resource_pack(p_main_pack, false, 0, true);
+ 		ERR_FAIL_COND_V_MSG(!ok, ERR_CANT_OPEN, vformat("Cannot open resource pack '%s'.", p_main_pack));
+ 
++		// Resources must be mounted before settings, global script classes and Autoloads.
++		for (const String &pack : startup_packs) {
++			ERR_FAIL_COND_V_MSG(!_load_resource_pack(pack, false), ERR_CANT_OPEN, vformat("Cannot open extra resource pack '%s'.", pack));
++		}
+ 		Error err = _load_settings_text_or_binary("res://project.godot", "res://project.binary");
+ #ifdef OVERRIDE_ENABLED
+ 		if (err == OK && !p_ignore_override) {
+diff --git a/platform/web/js/engine/engine.js b/platform/web/js/engine/engine.js
+--- a/platform/web/js/engine/engine.js
++++ b/platform/web/js/engine/engine.js
+@@ -40,6 +40,7 @@
+ 	 *
+ 	 * @function Engine.load
+ 	 */
++	Engine['scenePackProtocol'] = 2;
+ 	Engine.load = function (basePath, size) {
+ 		if (loadPromise == null) {
+ 			loadPath = basePath;

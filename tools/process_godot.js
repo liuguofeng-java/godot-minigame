@@ -115,6 +115,15 @@ function ensureCommitFrameWrapper(content) {
 
 let content = fs.readFileSync(GODOT_JS_PATH, "utf-8");
 
+// Godot exports the SafeEngine facade, not the internal Engine constructor.
+// Advertise the capability only when the compiled source contains its marker.
+if (content.includes("Engine['scenePackProtocol'] = 2;") &&
+        !content.includes("SafeEngine['scenePackProtocol']")) {
+    const facade = "SafeEngine['load'] = Engine.load;";
+    if (!content.includes(facade)) throw new Error("Scene pack engine facade was not found");
+    content = content.replace(facade, "SafeEngine['scenePackProtocol'] = Engine['scenePackProtocol'];\n\t" + facade);
+}
+
 content = ensureInvokeImportMappings(content);
 content = ensureCommitFrameWrapper(content);
 

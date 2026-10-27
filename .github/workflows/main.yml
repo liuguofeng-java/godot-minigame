@@ -8,7 +8,7 @@ on:
         type: boolean
         default: false
   push:
-    paths: ['build.py', 'wechat/**', 'engine/**', 'tools/**', 'tests/**', 'examples/**', '.github/workflows/main.yml']
+    paths: ['build.py', 'addons/**', 'wechat/**', 'engine/**', 'tools/**', 'tests/**', 'examples/**', '.github/workflows/main.yml']
   pull_request:
 
 permissions:
@@ -67,6 +67,13 @@ jobs:
           python build.py build --jobs 2 "${args[@]}"
       - name: Assemble template (PCK and AppID required before preview)
         run: python build.py package
+      - name: Package reusable Godot plugin
+        run: python tools/package_plugin.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scene-packer-plugin
+          path: dist/scene-packer-plugin.zip
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: wechat-engine-template-${{ inputs.enable_3d && '3d' || '2d' }}

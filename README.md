@@ -137,9 +137,15 @@ brotli --version
 
 ### 6. 从 scene-test 导出场景依赖分包
 
-`scene-test` 工程中的“场景分包”编辑器面板可配置入口场景、分组根场景，以及每组本地或远程加载方式。点“分析依赖和体积”预览加载顺序，点“导出微信小游戏”生成基础包、多个 `.pck.br`、固定清单和完整微信工程。默认示例为 `poison_island → island_environment → island_models`；敌人仍随主场景加载。详细步骤见该工程的 `docs/guides/scene-packs.md`。
+通用“场景分包”插件通过文件树把多个目录或文件分配到同一个包，验证指定场景的递归依赖，导出 `manifest.json` 和 `.pck.br`。插件不上传资源或组装微信工程。生成安装包：`python tools/package_plugin.py`。安装、缓存更新和后台验证见[场景分包与远程加载](docs/scene-packs.md)。`scene-test` 已接入该插件并提供毒岛配置。
 
-命令行调用时，导出器会使用本仓库新增的 `--scene-pack-manifest` 组装接口：
+新流程按远程清单启动，持久缓存只保存压缩包；修改 B 后只下载新版 B，成功进入场景后清理旧缓存。需重新编译包含 `--extra-pack` 补丁的引擎，3D 项目必须使用 `--enable-3d`。组装示例：
+
+```bash
+python build.py package --manifest-url https://cdn.example.com/game/manifest.json --output dist/wxgame-manifest
+```
+
+已有固定 schema-1 清单仍可使用原组装接口：
 
 ```bash
 python build.py package \

@@ -9,7 +9,7 @@ function validateRuntime(directory) {
         "godot-loader.js", "native-audio-config.js", "native-audio-manifest.js",
         "images/background.jpg", "images/logo.png", "build-info.json", "BUILD_STATUS.txt",
         "engine/game.js", "engine/godot-sdk.js", "engine/remote-pack.js", "engine/pack-config.js",
-        "engine/scene-packs.js", "engine/scene-pack-config.js",
+        "engine/scene-packs.js", "engine/scene-pack-config.js", "engine/manifest-packs.js",
         "engine/vendor/brotli-decode.js", "engine/vendor/BROTLI-LICENSE.txt",
         "engine/godot.js", "engine/godot.wasm.br"]) {
         assert(fs.statSync(path.join(root, file)).size > 0, `Missing/empty ${file}`);
@@ -20,7 +20,11 @@ function validateRuntime(directory) {
     const packMatch = /^\s*export default ([\s\S]*);\s*$/.exec(packSource);
     assert(packMatch, "Invalid pack config module");
     const pack = JSON.parse(packMatch[1]);
-    if (build.pack_mode === "remote") {
+    if (build.pack_mode === "manifest") {
+        assert(pack.mode === "manifest" && /^https:\/\/[^?#]+\.json$/.test(pack.manifest_url), "Invalid manifest URL");
+        assert(/^\d+\.\d+\.\d+$/.test(pack.engine_version), "Invalid manifest engine version");
+        assert(read("BUILD_STATUS.txt").includes("REMOTE MANIFEST"), "Missing manifest-mode notice");
+    } else if (build.pack_mode === "remote") {
         assert(pack.mode === "remote" && pack.schema === 1, "Missing remote PCK config");
         assert(/^https:\/\/[^?#]+\.pck\.br$/.test(pack.url), "Invalid remote PCK URL");
         assert(pack.path === "/engine/demo-pck.bin", "Invalid virtual PCK path");
@@ -83,6 +87,7 @@ function validateRuntime(directory) {
     const entry = read("engine/game.js");
     assert(entry.includes("import packConfig from './pack-config'"), "Entry must load PCK config");
     assert(entry.includes("import './remote-pack'"), "Entry must load remote PCK runtime");
+    assert(entry.includes("import './manifest-packs'"), "Entry must load manifest runtime");
     assert(entry.includes("import './scene-packs'"), "Entry must load scene pack runtime");
     const sdkIndex = entry.indexOf("import './godot-sdk'");
     assert(sdkIndex >= 0 && sdkIndex < entry.indexOf("import './godot'"), "SDK must load before the engine");

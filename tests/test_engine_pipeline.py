@@ -110,6 +110,24 @@ class PipelineTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Missing brotli'):
                 pipeline.require('brotli', 'Install Brotli.')
 
+    @unittest.skipUnless(shutil.which('brotli'), 'Brotli CLI required for manifest packaging test')
+    def test_remote_manifest_template_and_conflicts(self):
+        self.fake_build()
+        output = Path(self.tmp.name) / 'manifest-host'
+        self.pipe.package(self.source, output, manifest_url='https://cdn.example/game/manifest.json')
+        config = (output / 'engine/pack-config.js').read_text()
+        self.assertIn('"mode": "manifest"', config)
+        self.assertIn('https://cdn.example/game/manifest.json', config)
+        info = json.loads((output / 'build-info.json').read_text())
+        self.assertEqual(info['pack_mode'], 'manifest')
+        self.assertFalse(info['has_pck'])
+        self.assertFalse((output / 'engine/demo-pck.bin').exists())
+        with self.assertRaisesRegex(RuntimeError, 'cannot be combined'):
+            self.pipe.package(self.source, output, bundled_pack_config=Path('unused'),
+                              manifest_url='https://cdn.example/manifest.json')
+        with self.assertRaisesRegex(RuntimeError, 'HTTPS'):
+            self.pipe.package(self.source, output, manifest_url='http://cdn.example/manifest.json')
+
     def fake_build(self):
         self.pipe.apply(self.source)
         binary = self.source / 'bin/.web_zip'
