@@ -6,6 +6,12 @@ signal progress_changed(label: String, completed: float, total: float, detail: S
 signal error_occurred(message: String, retryable: bool, can_rollback: bool)
 signal actions_reset
 signal rollback_check_started
+signal initialization_completed
+## 独立加载页仍自动进入目标；主页只初始化桥接，等待玩家点击。
+@export var auto_start := true
+## 可选业务主页，运行时返回不走关卡成功确认流程。
+@export_file("*.tscn") var home_scene := ""
+var initialized := false
 @onready var view: CanvasLayer = $View
 var _serial := 0
 var _active := true
@@ -16,6 +22,10 @@ var _request := -1
 var _busy := false
 var _retry_stage := "resources"
 var _preparing_scene: Node
+var _finishing := false
+var _transition_paused := false
+var _pause_before_transition := false
+var _transition_serial := 0
 
 
 func _ready() -> void:
@@ -27,6 +37,8 @@ func _ready() -> void:
 	error_occurred.connect(view.show_error)
 	actions_reset.connect(view.reset_actions)
 	rollback_check_started.connect(view.show_rollback_check)
+	if not auto_start:
+		_set_active(false)
 	_start.call_deferred()
 
 
@@ -45,7 +57,8 @@ func _start() -> void:
 	# 再次进入启动场景时复用已有控制器，避免重复挂载桥接回调和加载遮罩。
 	var existing := get_tree().get_first_node_in_group("scene_loading_controller")
 	if existing != null and existing != self:
-		existing.request_scene(str(ProjectSettings.get_setting("scene_packer/initial_scene", "")))
+		if auto_start:
+			existing.request_initial_scene()
 		queue_free()
 		return
 	add_to_group("scene_loading_controller")
@@ -63,6 +76,16 @@ func _start() -> void:
 		_bridge.rollback_failed.connect(_rollback_failed)
 	# Render the page before asking for any gameplay packages.
 	await _drawn()
+	initialized = true
+	initialization_completed.emit()
+	if auto_start:
+		request_initial_scene()
+
+
+## 回退版本的目标来自成功记录；只在玩家开始或自动启动时读取，不预取玩法包。
+func request_initial_scene() -> void:
+	if not initialized:
+		return
 	var target := str(ProjectSettings.get_setting("scene_packer/initial_scene", ""))
 	if _bridge != null and not str(_bridge.rollback_scene()).is_empty():
 		target = str(_bridge.rollback_scene())
@@ -73,6 +96,31 @@ func _start() -> void:
 func request_scene(path: String) -> void:
 	if _busy:
 		return
+	_disconnect_preparation()
+	_serial += 1
+	_target = path
+	_set_active(true)
+	if _target.is_empty():
+		_error("尚未配置要进入的场景。", false)
+		return
+	_busy = true
+	_finishing = false
+	_retry_stage = "resources"
+	actions_reset.emit()
+	_show_progress("正在准备", 0, 0)
+	var ticket := _serial
+	await _view_transition(&"cover_scene")
+	if not _current(ticket):
+		return
+	if _bridge != null:
+		_request = int(_bridge.prepare_scene(_target))
+	else:
+		_request += 1
+		_load_resource.call_deferred()
+
+
+## 返回或重新加载前解除旧场景信号，防止已释放实例继续更新当前遮罩。
+func _disconnect_preparation() -> void:
 	if is_instance_valid(_preparing_scene):
 		if (
 			_preparing_scene.has_signal("preparation_progress")
@@ -85,21 +133,41 @@ func request_scene(path: String) -> void:
 		):
 			_preparing_scene.disconnect("preparation_finished", _preparation_finished)
 	_preparing_scene = null
-	_serial += 1
-	_target = path
-	_set_active(true)
-	if _target.is_empty():
-		_error("尚未配置要进入的场景。", false)
+
+
+## 主页已在启动包中；重建 UI，不卸载 PCK，也不把主页提交为成功关卡。
+func return_home() -> void:
+	if _busy or home_scene.is_empty():
 		return
+	_disconnect_preparation()
+	_serial += 1
+	var ticket := _serial
 	_busy = true
-	_retry_stage = "resources"
+	_target = ""
+	_request = -1
+	_set_active(true)
 	actions_reset.emit()
-	_show_progress("正在准备", 0, 0)
-	if _bridge != null:
-		_request = int(_bridge.prepare_scene(_target))
-	else:
-		_request += 1
-		_load_resource.call_deferred()
+	_show_progress("正在返回主页", 0, 0)
+	await _view_transition(&"cover_scene")
+	if not _current(ticket):
+		return
+	get_tree().paused = false
+	await _drawn()
+	if not _current(ticket):
+		return
+	if get_tree().change_scene_to_file(home_scene) != OK:
+		_error("无法返回主页，请重启后重试。", false)
+		return
+	await get_tree().scene_changed
+	await _drawn()
+	if not _current(ticket):
+		return
+	await _view_transition(&"reveal_scene")
+	if not _current(ticket):
+		return
+	_busy = false
+	_set_active(false)
+	print("GODOT_HOME_RETURNED")
 
 
 ## 下载计量为压缩字节，其余远程阶段为包数；未知总量保持等待状态。
@@ -226,11 +294,38 @@ func _preparation_finished(ok: bool, message: String) -> void:
 
 ## 收到成功提交回执后解除统一遮罩；原关卡预热层恢复独立显示的权限。
 func _confirmed(scene: String) -> void:
-	if scene != _target or not _busy:
+	if scene != _target or not _busy or _finishing:
+		return
+	_finishing = true
+	var ticket := _serial
+	await _view_transition(&"reveal_scene")
+	if not _current(ticket):
 		return
 	_busy = false
+	_finishing = false
 	_set_active(false)
 	print("GODOT_LOADING_COMPLETE ", scene)
+
+
+## 可选视图协议：切换前完整覆盖，确认成功后揭幕。短暂暂停防止遮罩下误操作。
+func _view_transition(method: StringName) -> void:
+	if not view.has_method(method):
+		return
+	_transition_serial += 1
+	var ticket := _transition_serial
+	_pause_before_transition = get_tree().paused
+	_transition_paused = true
+	get_tree().paused = true
+	await view.call(method)
+	_restore_transition_pause(ticket)
+
+
+func _restore_transition_pause(ticket: int = -1) -> void:
+	if ticket != -1 and ticket != _transition_serial:
+		return
+	if _transition_paused:
+		_transition_paused = false
+		get_tree().paused = _pause_before_transition
 
 
 func _failed(id: int, _code: String, message: String, retryable: bool) -> void:
@@ -254,6 +349,8 @@ func _confirmation_failed(scene: String, message: String) -> void:
 
 
 func _error(message: String, retryable: bool) -> void:
+	_restore_transition_pause()
+	_finishing = false
 	_busy = false
 	error_occurred.emit(message, retryable, _bridge != null and bool(_bridge.can_rollback()))
 
@@ -313,6 +410,7 @@ func _drawn() -> void:
 func _exit_tree() -> void:
 	if _relocating:
 		return
+	_restore_transition_pause()
 	_serial += 1
 	if _active:
 		_set_active(false)

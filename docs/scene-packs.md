@@ -117,8 +117,12 @@ run/main_scene="res://levels/loading/loading.tscn"
 
 [scene_packer]
 startup_mode="godot_loading"
-initial_scene="res://levels/poison_island/poison_island.tscn"
+initial_scene="res://levels/level_01/level_01.tscn"
 ```
+
+上例适用于自动加载页。使用业务主页时，将工程 `run/main_scene` 指向主页，并以 `auto_start=false` 装配同一持久控制器；首帧之后显示主页并允许操作，点击开始才调用 `request_initial_scene()`。`home_scene` 指定返回页面，`return_home()` 不提交成功版本。scene-test 的主页实现保持 `bootstrap + boot` 启动闭包；主页美术不依赖玩家或环境实例。
+
+隐藏浏览器验证可使用 `tools/verify_manifest_web.py --home-ui`，配合 `--host`、`--release`、`--brotli`、`--confirmed-scene` 和 `--output` 参数，保存主页、弹窗、横竖屏、安全区与进入关卡截图，并检查玩法包只在点击开始后下载。
 
 `initial_scene` 是示例加载控制器读取的延迟目标，业务也可自行选择其他目标。分析器检查该路径存在且已分包，但不将这个设置计入启动依赖；不要在加载脚本中 `preload()` 目标场景。插件仍全项目导出、检查所有场景，不提供入口选择器。加载页模式拒绝宿主的 `scene` 字段，防止绕过加载页。
 
@@ -185,6 +189,8 @@ python tools/verify_manifest_web.py --host <packaged-wechat-project> --release <
 `verify_manifest_web.py` 另需 Python Playwright 和 Microsoft Edge。它在无窗口浏览器内运行实际编译的 3D WebAssembly 引擎，使用模拟 wx 文件系统和本地路由，确认压缩包通过真实加载器挂载、场景就绪且成功清单已提交。使用 `--scene res://x/X.tscn --then-scene res://a/A.tscn --then-scene res://x/X.tscn` 验证任意场景启动与运行中切换、依赖补载及不重复下载。输出日志在 `build/manifest-web-verification/`；使用 `--output` 可更换目录。所有资源来自导出版本，不允许读取源工程补齐缺失文件。
 
 加载页可用 `--confirmed-scene res://a/A.tscn` 验证；加 `--fail-gameplay-once` 在后台模拟一次下载失败并点击 Godot 重试按钮。测试记录首帧、包请求、预热与版本提交顺序，并保存加载/失败/完成截图。
+
+scene-test 主页使用 `--home-ui --confirmed-scene res://levels/level_01/level_01.tscn` 验证三次真实触屏往返、主页不提前下载或提交版本，以及重复进入不重复挂载。`--home-cycles 1 --fail-gameplay-once` 检查失败后重试。`--home-preview-only --home-size 320x568`、`--home-size 844x390` 分别检查窄屏与横屏，`--home-preview-only --home-safe-area` 模拟安全区和胶囊。适配引擎固定初始画布尺寸，必须每个尺寸重新启动测试；这些截图不代表设备旋转已验收。
 
 JS 回归验证依赖顺序、并发限制、压缩缓存、损坏重下载、版本提交失败、整版离线回退及禁止混版。模拟微信接口和无头 Godot 不能代替微信宿主与 Android/iOS 真机验收。
 

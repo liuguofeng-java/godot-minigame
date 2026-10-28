@@ -13,6 +13,35 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.stdout.reconfigure(encoding="utf-8")
 
 
+def home_touch_points(width, top, bottom):
+    """Touch locations for the scene-test home composition, in host logical pixels."""
+    height = bottom - top
+    landscape = width > height * 1.15
+    compact = not landscape and height < 680
+    header = 64 if landscape or compact else min(96, max(64, height * 0.12))
+    primary = 88 if compact else min(112, max(88, width * 0.29))
+    help_height, gap = (52, 12) if compact else (56, 18)
+    action_height = primary + gap + help_height
+    if landscape:
+        settings_y = top + 44
+        actions_y = top + (height - action_height) / 2 + 24
+        center_x = width * 0.54 + min(400, width * 0.44 - 16) / 2
+    else:
+        header_gap, tail, section_gap = (12, 42, 16) if compact else (16, 48, 22)
+        reserved = header + action_height + tail + header_gap + section_gap + 24
+        art = min(width - 16, max(100, height - reserved))
+        content_height = header + header_gap + art + tail + section_gap + action_height
+        start_y = top + max(12, (height - content_height) / 2)
+        settings_y = start_y + header / 2
+        actions_y = start_y + content_height - action_height
+        center_x = width / 2
+    return (
+        (width - 48, settings_y),
+        (center_x, actions_y + primary / 2),
+        (center_x, actions_y + primary + gap + help_height / 2),
+    )
+
+
 def verify(
     host,
     release,
@@ -23,6 +52,11 @@ def verify(
     local_manifest_dev=False,
     confirmed_scene=None,
     fail_gameplay_once=False,
+    home_ui=False,
+    home_size=(390, 844),
+    home_safe_area=False,
+    home_preview_only=False,
+    home_cycles=3,
 ):
     host, release, output = Path(host).resolve(), Path(release).resolve(), Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -39,6 +73,7 @@ const downloads = [], timeline = [], download = wx.downloadFile;
 const runtime = GameGlobal.manifestPacks, ready = runtime.sceneReady, confirm = runtime.requestConfirm;
 const register = runtime.registerSceneLoader;
 const record = (event, value) => timeline.push({event, value, at:performance.now()});
+window.__homeTest = {downloads, timeline, record};
 const log = console.log;
 console.log = (...args) => { record('log', args.join(' ')); return log.apply(console, args); };
 runtime.registerSceneLoader = (callback, version) => register(payload => {
@@ -107,6 +142,26 @@ GameGlobal.GODOTSDK.startGame('/engine/godot', START_CONFIG, BrotliDecode)
     html = html.replace("LOADING_MODE", json.dumps(loading)).replace(
         "FAIL_GAMEPLAY", json.dumps(fail_gameplay_once)
     )
+    if home_ui:
+        width, height = home_size
+        html = html.replace(
+            'width="640" height="480"',
+            f'width="{width}" height="{height}" style="width:100vw;height:100vh;display:block"',
+        )
+        html = html.replace(
+            "const downloads = [],",
+            """wx.getWindowInfo = () => ({windowWidth:innerWidth,windowHeight:innerHeight,
+                screenWidth:innerWidth,screenHeight:innerHeight,pixelRatio:1,
+                safeArea:window.__safeArea || {left:0,top:0,right:innerWidth,bottom:innerHeight}});
+            wx.getMenuButtonBoundingClientRect = () => window.__capsule || {top:0,bottom:0};
+            const downloads = [],""",
+        )
+        if home_safe_area:
+            html = html.replace(
+                "wx.getWindowInfo =",
+                f"window.__safeArea={{left:0,top:44,right:{width},bottom:{height - 34}}};"
+                "window.__capsule={top:50,bottom:82}; wx.getWindowInfo =",
+            )
     logs, errors = [], []
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -118,7 +173,12 @@ GameGlobal.GODOTSDK.startGame('/engine/godot', START_CONFIG, BrotliDecode)
                 "--autoplay-policy=no-user-gesture-required",
             ],
         )
-        page = browser.new_page(viewport={"width": 640, "height": 480})
+        page = browser.new_page(
+            viewport={"width": home_size[0], "height": home_size[1]}
+            if home_ui
+            else {"width": 640, "height": 480},
+            has_touch=home_ui,
+        )
 
         def record(message):
             logs.append(message.type + ": " + message.text)
@@ -175,6 +235,54 @@ GameGlobal.GODOTSDK.startGame('/engine/godot', START_CONFIG, BrotliDecode)
             if loading:
                 page.wait_for_function("window.__pageReady", timeout=90000)
                 page.screenshot(path=str(output / "loading-page.png"))
+                if home_ui:
+                    page.wait_for_function(
+                        "window.__homeTest.timeline.some(e => e.event === 'log' && e.value === 'GODOT_HOME_READY')"
+                    )
+                    page.wait_for_timeout(1000)
+                    assert page.evaluate(
+                        "window.__homeTest.downloads.length === window.__initial.length"
+                    )
+                    assert not page.evaluate(
+                        "[...window.__cacheFiles.keys()].some(k=>k.endsWith('successful.json'))"
+                    )
+                    assert page.evaluate("[canvas.width, canvas.height]") == list(home_size), (
+                        "Screenshot must use the requested initial engine size"
+                    )
+                    page.screenshot(path=str(output / "home-portrait.png"))
+                    top, bottom = (90, height - 34) if home_safe_area else (0, height)
+                    settings_point, start_point, help_point = home_touch_points(width, top, bottom)
+                    dialog_top = top + max(12, (bottom - top - 420) / 2)
+                    dialog_right = (width + min(380, width - 32)) / 2
+                    page.mouse.click(*settings_point)
+                    page.wait_for_timeout(150)
+                    page.screenshot(path=str(output / "home-settings.png"))
+                    if not home_preview_only:
+                        page.mouse.click(width / 2, dialog_top + 146)
+                        page.mouse.click(width / 2, dialog_top + 208)
+                        page.wait_for_timeout(100)
+                        page.screenshot(path=str(output / "home-settings-edited.png"))
+                    page.mouse.click(dialog_right - 48, dialog_top + 44)
+                    page.mouse.click(*help_point)
+                    page.wait_for_timeout(150)
+                    page.screenshot(path=str(output / "home-help.png"))
+                    page.mouse.click(dialog_right - 48, dialog_top + 44)
+                    # The adapted engine fixes its canvas size at startup. Use a fresh
+                    # invocation per size; resizing the browser alone is not a rotation test.
+                    if home_preview_only:
+                        result = page.evaluate(
+                            "({ok:true, preview:true, initial:__initial, downloads:__homeTest.downloads,"
+                            "timeline:__homeTest.timeline, files:[...__cacheFiles.keys()]})"
+                        )
+                        assert result["downloads"] == result["initial"]
+                        assert not any(k.endswith("successful.json") for k in result["files"])
+                        assert not errors and not any("ERROR:" in line for line in logs)
+                        print("REAL_WASM_HOME_PREVIEW_VERIFIED", output)
+                        return
+                    page.evaluate("window.__homeTest.record('start_click', 'level_01')")
+                    page.touchscreen.tap(*start_point)
+                    page.wait_for_timeout(200)
+                    page.screenshot(path=str(output / "home-start-loading.png"))
                 if fail_gameplay_once:
                     page.wait_for_function("window.__failed", timeout=90000)
                     page.wait_for_timeout(150)
@@ -182,11 +290,67 @@ GameGlobal.GODOTSDK.startGame('/engine/godot', START_CONFIG, BrotliDecode)
                     assert not page.evaluate(
                         "[...window.__cacheFiles.keys()].some(k=>k.endsWith('successful.json'))"
                     )
-                    page.mouse.click(320, 315)
+                    page.mouse.click(195, 500) if home_ui else page.mouse.click(320, 315)
             page.wait_for_function("window.__result !== undefined", timeout=240000)
             result = page.evaluate("window.__result")
             page.wait_for_timeout(1000)  # Observe the first running frames after scene readiness.
             page.screenshot(path=str(output / "ready.png"))
+            if home_ui:
+                assert home_size == (390, 844) and not home_safe_area, (
+                    "Full interaction coordinates use 390x844; use preview-only for other sizes"
+                )
+                for cycle in range(home_cycles):
+                    page.touchscreen.tap(273, 44)
+                    page.wait_for_timeout(150)
+                    page.screenshot(path=str(output / f"game-settings-{cycle + 1}.png"))
+                    page.touchscreen.tap(195, 452)
+                    page.wait_for_timeout(150)
+                    page.screenshot(path=str(output / f"return-confirm-{cycle + 1}.png"))
+                    if cycle == 0:
+                        page.touchscreen.tap(114, 501)
+                        page.wait_for_timeout(150)
+                        assert (
+                            page.evaluate(
+                                "__homeTest.timeline.filter(e=>e.event==='log' && e.value==='GODOT_HOME_RETURNED').length"
+                            )
+                            == 0
+                        ), "Cancel must keep the current level"
+                        page.touchscreen.tap(195, 452)
+                        page.wait_for_timeout(150)
+                    page.touchscreen.tap(275, 501)
+                    page.wait_for_function(
+                        "count => __homeTest.timeline.filter(e=>e.event==='log' && e.value==='GODOT_HOME_RETURNED').length === count",
+                        arg=cycle + 1,
+                        timeout=30000,
+                    )
+                    page.wait_for_function(
+                        "count => __homeTest.timeline.filter(e=>e.event==='log' && e.value==='GODOT_HOME_READY').length === count",
+                        arg=cycle + 2,
+                    )
+                    page.wait_for_timeout(300)
+                    page.screenshot(path=str(output / f"home-returned-{cycle + 1}.png"))
+                    if cycle == 0:
+                        page.touchscreen.tap(*settings_point)
+                        page.wait_for_timeout(150)
+                        page.screenshot(path=str(output / "home-settings-persisted.png"))
+                        page.touchscreen.tap(326, 256)
+                    assert (
+                        page.evaluate("__homeTest.timeline.filter(e=>e.event==='confirm').length")
+                        == cycle + 1
+                    ), "Returning home must not confirm a release"
+                    if cycle + 1 < home_cycles:
+                        page.touchscreen.tap(*start_point)
+                        page.touchscreen.tap(*start_point)
+                        page.wait_for_function(
+                            "count => __homeTest.timeline.filter(e=>e.event==='log' && e.value.startsWith('GODOT_LOADING_COMPLETE ')).length === count",
+                            arg=cycle + 2,
+                            timeout=90000,
+                        )
+                        page.wait_for_timeout(150)
+                result = page.evaluate(
+                    "({...__result, files:[...__cacheFiles.keys()], downloads:__homeTest.downloads,"
+                    "timeline:__homeTest.timeline})"
+                )
         finally:
             (output / "console.log").write_text("\n".join(logs + errors), encoding="utf-8")
             (output / "result.json").write_text(
@@ -249,10 +413,26 @@ GameGlobal.GODOTSDK.startGame('/engine/godot', START_CONFIG, BrotliDecode)
             for e in result["timeline"]
             if e["event"] == "log" and "[渲染预热] 完成" in e["value"]
         ]
-        if "poison_island" in confirmed_scene:
-            assert warmups and confirms and min(confirms) >= max(warmups), (
-                "Version committed before rendering warmup"
+        if confirmed_scene == "res://levels/level_01/level_01.tscn":
+            assert (
+                warmups
+                and len(warmups) == len(confirms)
+                and all(confirmed >= warmed for warmed, confirmed in zip(warmups, confirms))
+            ), "Version committed before rendering warmup"
+        if home_ui:
+            clicked = next(e["at"] for e in result["timeline"] if e["event"] == "start_click")
+            assert all(
+                e["at"] >= clicked
+                for e in result["timeline"]
+                if e["event"] == "download" and e["value"] not in result["initial"]
             )
+            mounted = [
+                path
+                for e in result["timeline"]
+                if e["event"] == "bridge" and e["value"].get("command") == "prepare"
+                for path in e["value"].get("packs", [])
+            ]
+            assert len(mounted) == len(set(mounted)), "Repeated entry remounted packages"
     for target in transitions or []:
         expected |= required(target)
     assert set(result["downloads"]) == expected, "Scene loads omitted packages"
@@ -290,6 +470,19 @@ if __name__ == "__main__":
         action="store_true",
         help="Interrupt one gameplay download and retry using the actual Godot button",
     )
+    parser.add_argument(
+        "--home-ui",
+        action="store_true",
+        help="Inspect the home UI and start via its real touch button",
+    )
+    parser.add_argument("--home-size", default="390x844", help="Fresh engine canvas WIDTHxHEIGHT")
+    parser.add_argument(
+        "--home-safe-area", action="store_true", help="Simulate notch and wx capsule"
+    )
+    parser.add_argument(
+        "--home-preview-only", action="store_true", help="Capture home without starting gameplay"
+    )
+    parser.add_argument("--home-cycles", type=int, default=3, help="Real touch start/return cycles")
     args = parser.parse_args()
     verify(
         args.host,
@@ -301,4 +494,9 @@ if __name__ == "__main__":
         args.local_manifest_dev,
         args.confirmed_scene,
         args.fail_gameplay_once,
+        args.home_ui,
+        tuple(int(n) for n in args.home_size.split("x")),
+        args.home_safe_area,
+        args.home_preview_only,
+        args.home_cycles,
     )
