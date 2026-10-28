@@ -6,11 +6,17 @@ end_of_line = lf
 insert_final_newline = true
 trim_trailing_whitespace = true
 
-[*.{cpp,h,hpp}]
+[*.gd]
+indent_style = tab
+indent_size = 4
+max_line_length = 100
+
+[*.{py,js,cjs,mjs}]
 indent_style = space
 indent_size = 4
+max_line_length = 100
 
-[*.py]
+[*.{cpp,h,hpp}]
 indent_style = space
 indent_size = 4
 

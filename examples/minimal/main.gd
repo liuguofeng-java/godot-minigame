@@ -5,6 +5,7 @@ var count := 0
 var status: Label
 var player: AudioStreamPlayer
 
+
 func _ready() -> void:
 	if FileAccess.file_exists(SAVE_PATH):
 		count = FileAccess.get_file_as_string(SAVE_PATH).to_int()
@@ -25,12 +26,14 @@ func _ready() -> void:
 	add_child(player)
 	status.text = "Saved count: %d\nRestart the game to check persistence." % count
 
+
 func add_button(layout: VBoxContainer, caption: String, action: Callable) -> void:
 	var button := Button.new()
 	button.text = caption
 	button.custom_minimum_size.y = 56
 	button.pressed.connect(action)
 	layout.add_child(button)
+
 
 func save_counter() -> void:
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -40,7 +43,10 @@ func save_counter() -> void:
 	count += 1
 	file.store_string(str(count))
 	file.close()
-	status.text = "Saved count: %d\nRead back: %s" % [count, FileAccess.get_file_as_string(SAVE_PATH)]
+	status.text = (
+		"Saved count: %d\nRead back: %s" % [count, FileAccess.get_file_as_string(SAVE_PATH)]
+	)
+
 
 func play_tone(seconds: float) -> void:
 	player.stop()

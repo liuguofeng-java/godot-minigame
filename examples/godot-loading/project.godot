@@ -1,0 +1,15 @@
+config_version=5
+[application]
+config/name="Godot loading page example"
+run/main_scene="res://levels/loading/loading.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+[display]
+window/size/viewport_width=640
+window/size/viewport_height=480
+[rendering]
+renderer/rendering_method="gl_compatibility"
+[scene_packer]
+startup_mode="godot_loading"
+initial_scene="res://levels/demo/demo.tscn"
+[editor_plugins]
+enabled=PackedStringArray("res://addons/scene_packer/plugin.cfg")

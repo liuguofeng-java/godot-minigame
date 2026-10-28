@@ -1,0 +1,11 @@
+line_length: 100
+use_spaces: null
+# Explicit source lists in tools/format_sources.py keep generated data unchanged.
+excluded_directories:
+  - .git
+  - .godot
+  - build
+  - dist
+  - output
+  - node_modules
+  - vendor

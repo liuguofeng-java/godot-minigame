@@ -12,15 +12,49 @@ const libs = path.join(__dirname, "../engine/sources/platform/web/js/libs");
     let request, onHeaders, onChunk;
     const heap = new Uint8Array(32);
     const context = {
-        ArrayBuffer, Uint8Array, TextEncoder, console, HEAP8: heap,
-        IDHandler: { add(value) { records.set(++id, value); return id; }, get: (key) => records.get(key), remove: (key) => records.delete(key) },
-        GodotRuntime: { heapCopy: (target, bytes, offset) => target.set(bytes, offset), error() {} },
-        LibraryManager: { library: {} }, autoAddDeps() {}, mergeInto() {},
-        wx: { request(options) { request = options; return { onHeadersReceived(fn) { onHeaders = fn; }, onChunkReceived(fn) { onChunk = fn; }, abort() {} }; } },
+        ArrayBuffer,
+        Uint8Array,
+        TextEncoder,
+        console,
+        HEAP8: heap,
+        IDHandler: {
+            add(value) {
+                records.set(++id, value);
+                return id;
+            },
+            get: (key) => records.get(key),
+            remove: (key) => records.delete(key),
+        },
+        GodotRuntime: {
+            heapCopy: (target, bytes, offset) => target.set(bytes, offset),
+            error() {},
+        },
+        LibraryManager: { library: {} },
+        autoAddDeps() {},
+        mergeInto() {},
+        wx: {
+            request(options) {
+                request = options;
+                return {
+                    onHeadersReceived(fn) {
+                        onHeaders = fn;
+                    },
+                    onChunkReceived(fn) {
+                        onChunk = fn;
+                    },
+                    abort() {},
+                };
+            },
+        },
     };
     vm.createContext(context);
-    vm.runInContext(fs.readFileSync(path.join(libs, "library_godot_fetch.js"), "utf8").replace("const GodotFetch =", "var GodotFetch =") +
-        ";globalThis.api=GodotFetch;GodotFetch=GodotFetch.$GodotFetch;", context);
+    vm.runInContext(
+        fs
+            .readFileSync(path.join(libs, "library_godot_fetch.js"), "utf8")
+            .replace("const GodotFetch =", "var GodotFetch =") +
+            ";globalThis.api=GodotFetch;GodotFetch=GodotFetch.$GodotFetch;",
+        context
+    );
     const key = context.GodotFetch.create("GET", "https://example.invalid/data", {}, null);
     onHeaders({ statusCode: 200, header: {} });
     onChunk({ data: Uint8Array.from([1, 2, 3]).buffer });
@@ -42,12 +76,22 @@ const libs = path.join(__dirname, "../engine/sources/platform/web/js/libs");
 {
     const files = new Map();
     const filesystem = {
-        writeFileSync(name, data) { files.set(name, typeof data === "string" ? new ArrayBuffer(0) : data.slice(0)); },
-        readFileSync(name) { if (!files.has(name)) throw new Error("ENOENT"); return files.get(name).slice(0); },
+        writeFileSync(name, data) {
+            files.set(name, typeof data === "string" ? new ArrayBuffer(0) : data.slice(0));
+        },
+        readFileSync(name) {
+            if (!files.has(name)) throw new Error("ENOENT");
+            return files.get(name).slice(0);
+        },
     };
     function runtime() {
-        const context = { console, Uint8Array, GameGlobal: { GODOTSDK: {} },
-            FS: { isFile: () => true }, wx: { getFileSystemManager: () => filesystem } };
+        const context = {
+            console,
+            Uint8Array,
+            GameGlobal: { GODOTSDK: {} },
+            FS: { isFile: () => true },
+            wx: { getFileSystemManager: () => filesystem },
+        };
         vm.createContext(context);
         vm.runInContext(fs.readFileSync(path.join(libs, "library_godot_fs.js"), "utf8"), context);
         context.WXMEMFS.wxBasePath = "wxfile://usr";
@@ -65,7 +109,11 @@ const libs = path.join(__dirname, "../engine/sources/platform/web/js/libs");
     api.stream_ops.close(stream);
     assert.equal(files.get("wxfile://usr/test.dat").byteLength, 4);
     const rebooted = runtime();
-    const reopened = { node: { mode: 32768, contents: null, usedBytes: 0 }, path: stream.path, flags: 0 };
+    const reopened = {
+        node: { mode: 32768, contents: null, usedBytes: 0 },
+        path: stream.path,
+        flags: 0,
+    };
     rebooted.stream_ops.open(reopened);
     assert.equal(rebooted.stream_ops.read(reopened, buffer, 0, 10, 0), 4);
     assert.deepEqual(Array.from(buffer.slice(0, 4)), [1, 2, 3, 4]);

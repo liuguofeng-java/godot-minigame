@@ -1,0 +1,17 @@
+{
+    "printWidth": 100,
+    "tabWidth": 4,
+    "useTabs": false,
+    "singleQuote": false,
+    "trailingComma": "es5",
+    "endOfLine": "lf",
+    "overrides": [
+        {
+            "files": "wechat/engine/*-config.js",
+            "options": {
+                "quoteProps": "preserve",
+                "trailingComma": "none"
+            }
+        }
+    ]
+}

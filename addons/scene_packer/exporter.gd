@@ -7,6 +7,7 @@ var workspace: String = ""
 var source_root: String = ""
 var snapshots: Dictionary = {}
 
+
 func export_project(config: Dictionary, output: String, brotli: String) -> Dictionary:
 	var environment: Dictionary = {}
 	for key: String in ["TEMP", "TMP", "TMPDIR"]:
@@ -20,6 +21,7 @@ func export_project(config: Dictionary, output: String, brotli: String) -> Dicti
 	if not workspace.is_empty():
 		_remove_tree(workspace)
 	return result
+
 
 ## 在隔离副本中执行完整导出，并按实际完成的阶段报告进度。
 func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
@@ -37,11 +39,13 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 		brotli = "brotli"
 	if not _execute(brotli, ["--version"]):
 		return {"ok": false, "error": "找不到 Brotli，请设置可执行文件路径。\n" + error}
-	var total_steps: int = 6 + analysis.order.size() + 1 # 固定步骤和 bootstrap/业务包。
+	var total_steps: int = 6 + analysis.order.size() + 1  # 固定步骤和 bootstrap/业务包。
 	_emit_progress(0, total_steps, "正在复制项目")
 	source_root = ProjectSettings.globalize_path("res://").trim_suffix("/")
 	DirAccess.make_dir_recursive_absolute(output.get_base_dir())
-	workspace = output.get_base_dir().path_join(".scene-packer-%s-%s" % [OS.get_process_id(), Time.get_ticks_usec()])
+	workspace = output.get_base_dir().path_join(
+		".scene-packer-%s-%s" % [OS.get_process_id(), Time.get_ticks_usec()]
+	)
 	var stage := workspace.path_join("project")
 	var product := workspace.path_join("product")
 	DirAccess.make_dir_recursive_absolute(stage)
@@ -67,7 +71,10 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 	settings.set_value("autoload", "__ScenePackReady", "*res://__scene_packer_ready.gd")
 	if settings.save(stage.path_join("project.godot")) != OK:
 		return {"ok": false, "error": "无法写入导出副本配置。"}
-	DirAccess.copy_absolute(source_root.path_join("addons/scene_packer/runtime_ready.gd"), stage.path_join("__scene_packer_ready.gd"))
+	DirAccess.copy_absolute(
+		source_root.path_join("addons/scene_packer/runtime_ready.gd"),
+		stage.path_join("__scene_packer_ready.gd")
+	)
 	var presets := ConfigFile.new()
 	var original := ConfigFile.new()
 	original.load("res://export_presets.cfg")
@@ -78,7 +85,9 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 			break
 	if not original_section.is_empty():
 		for key: String in original.get_section_keys(original_section + ".options"):
-			presets.set_value("preset.0.options", key, original.get_value(original_section + ".options", key))
+			presets.set_value(
+				"preset.0.options", key, original.get_value(original_section + ".options", key)
+			)
 	presets.set_value("preset.0", "name", "Scene Packs")
 	presets.set_value("preset.0", "platform", "Web")
 	presets.set_value("preset.0", "runnable", false)
@@ -115,7 +124,9 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 	_emit_progress(3, total_steps, "正在执行 Web 导出")
 	print("SCENE_PACKS_STAGE 官方 Web 导出")
 	var zip_path := workspace.path_join("export.zip")
-	if not _execute(executable, ["--headless", "--path", stage, "--export-pack", "Scene Packs", zip_path]):
+	if not _execute(
+		executable, ["--headless", "--path", stage, "--export-pack", "Scene Packs", zip_path]
+	):
 		return {"ok": false, "error": error}
 	_emit_progress(4, total_steps, "正在整理导出文件")
 	var zip := ZIPReader.new()
@@ -134,7 +145,18 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 		for suffix: String in [".import", ".remap", ".uid"]:
 			if file.ends_with(suffix):
 				owner = str(analysis.owners.get(resource.trim_suffix(suffix), owner))
-		if file.begins_with("__scene_packer_ready.gd") or file in ["project.binary", ".godot/global_script_class_cache.cfg", ".godot/uid_cache.bin", ".godot/extension_list.cfg"]:
+		if (
+			file.begins_with("__scene_packer_ready.gd")
+			or (
+				file
+				in [
+					"project.binary",
+					".godot/global_script_class_cache.cfg",
+					".godot/uid_cache.bin",
+					".godot/extension_list.cfg"
+				]
+			)
+		):
 			owner = "bootstrap"
 		if not owner.is_empty() and buckets.has(owner):
 			emitted[file] = owner
@@ -152,12 +174,18 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 						if key == "source_file":
 							continue
 						var value: Variant = mapping.get_value(section, key)
-						var paths: Array = [value] if value is String else Array(value) if value is PackedStringArray else []
+						var paths: Array = (
+							[value]
+							if value is String
+							else Array(value) if value is PackedStringArray else []
+						)
 						for path: Variant in paths:
 							if str(path).begins_with("res://"):
 								emitted[str(path).trim_prefix("res://")] = owner
 								if str(path).ends_with(".scn"):
-									scene_outputs[resource.trim_suffix(".import").trim_suffix(".remap")] = str(path).trim_prefix("res://")
+									scene_outputs[resource.trim_suffix(".import").trim_suffix(".remap")] = (
+										str(path).trim_prefix("res://")
+									)
 	var extracted := workspace.path_join("unpacked")
 	for file: String in archive:
 		if not emitted.has(file):
@@ -175,7 +203,10 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 			global_classes.parse(data.get_string_from_utf8())
 			var selected_classes: Array = []
 			for item: Dictionary in global_classes.get_value("", "list", []):
-				if analysis.owners.has(str(item.path)) and buckets.has(analysis.owners[str(item.path)]):
+				if (
+					analysis.owners.has(str(item.path))
+					and buckets.has(analysis.owners[str(item.path)])
+				):
 					selected_classes.append(item)
 			global_classes.set_value("", "list", selected_classes)
 			data = global_classes.encode_to_text().to_utf8_buffer()
@@ -192,13 +223,31 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 	isolated_config.close()
 	print("SCENE_PACKS_STAGE 固定导出场景节点标识")
 	_emit_progress(4, total_steps, "正在规范化场景")
-	if not _execute(executable, ["--headless", "--path", extracted, "--script", source_root.path_join("addons/scene_packer/normalize_scenes.gd"), "--", normalization]):
+	if not _execute(
+		executable,
+		[
+			"--headless",
+			"--path",
+			extracted,
+			"--script",
+			source_root.path_join("addons/scene_packer/normalize_scenes.gd"),
+			"--",
+			normalization
+		]
+	):
 		return {"ok": false, "error": error}
 	var version := Engine.get_version_info()
-	var manifest := {"schema": 3, "project_id": config.project_id,
+	var manifest := {
+		"schema": 4,
+		"project_id": config.project_id,
+		"startup_mode": analysis.startup_mode,
 		"engine_version": "%s.%s.%s" % [version.major, version.minor, version.patch],
-		"project_scene": analysis.project_scene, "scene_override": analysis.scene_override, "bootstrap": "bootstrap",
-		"scene_to_pack": analysis.scene_to_pack, "packs": {}}
+		"project_scene": analysis.project_scene,
+		"scene_override": analysis.scene_override,
+		"bootstrap": "bootstrap",
+		"scene_to_pack": analysis.scene_to_pack,
+		"packs": {}
+	}
 	var pack_ids: Array = buckets.keys()
 	pack_ids.sort()
 	_emit_progress(5, total_steps, "正在打包（0/%s）" % pack_ids.size())
@@ -219,19 +268,36 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 		if not _execute(brotli, ["-q", "11", "-f", "-o", compressed, pck]):
 			return {"ok": false, "error": error}
 		var restored := workspace.path_join(id + ".verify.pck")
-		if not _execute(brotli, ["-d", "-f", "-o", restored, compressed]) or FileAccess.get_sha256(restored) != FileAccess.get_sha256(pck):
+		if (
+			not _execute(brotli, ["-d", "-f", "-o", restored, compressed])
+			or FileAccess.get_sha256(restored) != FileAccess.get_sha256(pck)
+		):
 			return {"ok": false, "error": "Brotli 回读校验失败：" + id + "\n" + error}
 		var br_hash := FileAccess.get_sha256(compressed)
 		var relative := "packs/%s-%s.pck.br" % [id, br_hash]
 		if DirAccess.copy_absolute(compressed, product.path_join(relative)) != OK:
 			return {"ok": false, "error": "无法保存压缩包：" + relative}
-		manifest.packs[id] = {"url": relative, "compression": "br", "br_sha256": br_hash,
+		manifest.packs[id] = {
+			"url": relative,
+			"compression": "br",
+			"br_sha256": br_hash,
 			"br_size": FileAccess.open(compressed, FileAccess.READ).get_length(),
-			"pck_sha256": FileAccess.get_sha256(pck), "pck_size": FileAccess.open(pck, FileAccess.READ).get_length(),
+			"pck_sha256": FileAccess.get_sha256(pck),
+			"pck_size": FileAccess.open(pck, FileAccess.READ).get_length(),
 			"depends": analysis.bootstrap_depends if id == "bootstrap" else analysis.depends[id],
-			"files": [] if id == "bootstrap" else analysis.packs[id], "archive_files": buckets[id]}
+			"files": [] if id == "bootstrap" else analysis.packs[id],
+			"archive_files": buckets[id]
+		}
 		completed_packs += 1
-		_emit_progress(5 + completed_packs, total_steps, "正在打包（%s/%s）" % [completed_packs, pack_ids.size()] if completed_packs < pack_ids.size() else "正在生成清单")
+		_emit_progress(
+			5 + completed_packs,
+			total_steps,
+			(
+				"正在打包（%s/%s）" % [completed_packs, pack_ids.size()]
+				if completed_packs < pack_ids.size()
+				else "正在生成清单"
+			)
+		)
 	for path: String in snapshots:
 		if FileAccess.get_sha256(path) != snapshots[path]:
 			return {"ok": false, "error": "导出期间源文件发生变化，请重新导出：" + path}
@@ -244,9 +310,11 @@ func _export(config: Dictionary, output: String, brotli: String) -> Dictionary:
 	print("SCENE_PACKS_EXPORTED ", output)
 	return {"ok": true, "output": output, "manifest": manifest}
 
+
 ## 向编辑器发送已完成步骤；同一步骤可更新当前阶段而不虚增进度。
 func _emit_progress(done: int, total: int, stage: String) -> void:
 	print("SCENE_PACKS_PROGRESS " + JSON.stringify({"done": done, "total": total, "stage": stage}))
+
 
 func _execute(executable: String, arguments: PackedStringArray) -> bool:
 	var captured: Array = []
@@ -258,6 +326,7 @@ func _execute(executable: String, arguments: PackedStringArray) -> bool:
 		error = "命令失败（%s）：%s\n%s" % [code, executable, log]
 		return false
 	return true
+
 
 func _copy_project(source: String, target: String, output: String) -> bool:
 	var dir := DirAccess.open(source)
@@ -275,11 +344,18 @@ func _copy_project(source: String, target: String, output: String) -> bool:
 			return false
 	for name: String in dir.get_directories():
 		var path := source.path_join(name)
-		if name.begins_with(".") or name in ANALYZER.IGNORED or path == output or path == workspace or name == "__pycache__":
+		if (
+			name.begins_with(".")
+			or name in ANALYZER.IGNORED
+			or path == output
+			or path == workspace
+			or name == "__pycache__"
+		):
 			continue
 		if not _copy_project(path, target.path_join(name), output):
 			return false
 	return true
+
 
 func _remove_tree(path: String) -> void:
 	# Never remove source/output paths; only descendants of our unique workspace.

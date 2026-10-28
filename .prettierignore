@@ -1,0 +1,8 @@
+build/
+dist/
+output/
+**/.godot/
+**/vendor/
+node_modules/
+engine/sources/
+engine/patches/

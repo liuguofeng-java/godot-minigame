@@ -3,10 +3,13 @@ extends RefCounted
 ## A more specific include/exclude rule overrides an ancestor rule.
 ## Directory includes keep discovering new files even after excluding one child.
 
+
 static func covers(rule: String, path: String) -> bool:
 	rule = rule.trim_suffix("/") if rule != "res://" else rule
 	return path == rule or path.begins_with(rule if rule == "res://" else rule + "/")
 
+
+## 更具体的路径覆盖父级规则；同一深度的排除规则优先。
 static func selected(definition: Dictionary, path: String) -> bool:
 	var depth := -1
 	var included := false
@@ -22,6 +25,8 @@ static func selected(definition: Dictionary, path: String) -> bool:
 			included = false
 	return included
 
+
+## 修改父级时移除其下所有例外，使筛选后的可见节点和隐藏节点保持一致。
 static func toggle(definition: Dictionary, path: String, checked: bool) -> Dictionary:
 	var result := definition.duplicate(true)
 	path = path.trim_suffix("/") if path != "res://" else path
@@ -40,6 +45,7 @@ static func toggle(definition: Dictionary, path: String, checked: bool) -> Dicti
 	if result.excludes.is_empty():
 		result.erase("excludes")
 	return result
+
 
 static func index(files: Array[String], groups: Dictionary, active: String) -> Dictionary:
 	var nodes: Dictionary = {}
@@ -68,6 +74,7 @@ static func index(files: Array[String], groups: Dictionary, active: String) -> D
 				state.owners[id] = int(state.owners.get(id, 0)) + 1
 	return {"nodes": nodes, "counts": counts}
 
+
 ## 返回当前包以外已选中该文件或目录内文件的资源包。
 static func foreign_owners(state: Dictionary, active: String) -> Array[String]:
 	var result: Array[String] = []
@@ -77,6 +84,7 @@ static func foreign_owners(state: Dictionary, active: String) -> Array[String]:
 			result.append(id)
 	result.sort()
 	return result
+
 
 ## 目录含外包资源时禁止整目录操作；重复归属的单文件只允许从当前包取消。
 static func can_toggle(state: Dictionary, active: String, is_file: bool, checked: bool) -> bool:

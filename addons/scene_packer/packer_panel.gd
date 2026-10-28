@@ -36,6 +36,7 @@ var export_button: Button
 var reload_button: Button
 var _scale := 1.0
 
+
 func _init(editor_scale: float = 1.0) -> void:
 	_scale = editor_scale
 	name = "ScenePackerPanel"
@@ -59,6 +60,7 @@ func _init(editor_scale: float = 1.0) -> void:
 	export_button = _button(actions, "导出 .pck.br")
 	export_button.tooltip_text = "检查整个项目的场景与资源依赖，导出全部配置的资源包。"
 
+
 func _page(title: String) -> VBoxContainer:
 	var margin := MarginContainer.new()
 	margin.name = title
@@ -69,6 +71,7 @@ func _page(title: String) -> VBoxContainer:
 	content.add_theme_constant_override("separation", int(6 * _scale))
 	margin.add_child(content)
 	return content
+
 
 func _build_resources() -> void:
 	var page := _page("资源分包")
@@ -117,6 +120,7 @@ func _build_resources() -> void:
 	right.add_child(tree)
 	tree.tooltip_text = "父级勾选会联动全部子项；取消子项后父级显示半选。选择后自动更新归属、数量和依赖。"
 
+
 func _build_settings() -> void:
 	var page := _page("导出设置")
 	var scroll := ScrollContainer.new()
@@ -150,6 +154,7 @@ func _build_settings() -> void:
 	resource_hint = _label(form, "先在资源分包页选择一个包。")
 	resource_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	resource_hint.modulate.a = 0.75
+
 
 ## 建立分析结果页和后台导出的进度栏。
 func _build_results() -> void:
@@ -189,16 +194,19 @@ func _build_results() -> void:
 	status.placeholder_text = "依赖引用链、验证错误和导出进度显示在这里。"
 	split.add_child(status)
 
+
 func _form_row(parent: Control, title: String) -> HBoxContainer:
 	var row := _row(parent)
 	_label(row, title).custom_minimum_size.x = 90 * _scale
 	return row
+
 
 func _row(parent: Control) -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", int(8 * _scale))
 	parent.add_child(row)
 	return row
+
 
 func _line_edit(parent: Control, placeholder: String) -> LineEdit:
 	var field := LineEdit.new()
@@ -208,11 +216,13 @@ func _line_edit(parent: Control, placeholder: String) -> LineEdit:
 	parent.add_child(field)
 	return field
 
+
 func _button(parent: Control, text: String) -> Button:
 	var button := Button.new()
 	button.text = text
 	parent.add_child(button)
 	return button
+
 
 func _label(parent: Control, text: String) -> Label:
 	var label := Label.new()
@@ -220,10 +230,12 @@ func _label(parent: Control, text: String) -> Label:
 	parent.add_child(label)
 	return label
 
+
 func _note(parent: Control, text: String) -> void:
 	var label := _label(parent, text)
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.modulate.a = 0.75
+
 
 func select_pack(id: String, count: int, selected_files: int) -> void:
 	pack_count.text = "资源包 · %s" % count
@@ -234,7 +246,10 @@ func select_pack(id: String, count: int, selected_files: int) -> void:
 	resource_hint.text = "先在资源分包页添加或选择一个包。" if id.is_empty() else "当前资源包：%s。此处只需补充无法自动分析的动态依赖。" % id
 	resource_hint.tooltip_text = resource_hint.text
 
-func show_message(message: String, details: String = "", reveal: bool = false, failed: bool = false) -> void:
+
+func show_message(
+	message: String, details: String = "", reveal: bool = false, failed: bool = false
+) -> void:
 	notice.text = message
 	notice.tooltip_text = message
 	if failed:
@@ -248,6 +263,7 @@ func show_message(message: String, details: String = "", reveal: bool = false, f
 		summary.text = message
 		summary.tooltip_text = message
 
+
 ## 展示最新分析结果并收起上一次导出的进度。
 func show_analysis(result: Dictionary) -> void:
 	progress_row.visible = false
@@ -255,7 +271,17 @@ func show_analysis(result: Dictionary) -> void:
 	var root := report.create_item()
 	for id: String in result.get("order", []):
 		var item := report.create_item(root)
-		_cells(item, [id, str(result.packs[id].size()), String.humanize_size(result.sizes[id]), "待导出", ", ".join(result.depends[id]) if not result.depends[id].is_empty() else "无"])
+		_cells(
+			item,
+			[
+				id,
+				str(result.packs[id].size()),
+				String.humanize_size(result.sizes[id]),
+				"待导出",
+				", ".join(result.depends[id]) if not result.depends[id].is_empty() else "无"
+			]
+		)
+
 
 func show_export(manifest: Dictionary) -> void:
 	report.clear()
@@ -263,8 +289,37 @@ func show_export(manifest: Dictionary) -> void:
 	for id: String in manifest.packs:
 		var pack: Dictionary = manifest.packs[id]
 		var item := report.create_item(root)
-		_cells(item, [id, str(pack.archive_files.size()), String.humanize_size(pack.pck_size), String.humanize_size(pack.br_size), ", ".join(pack.depends) if not pack.depends.is_empty() else "无"])
+		_cells(
+			item,
+			[
+				id,
+				str(pack.archive_files.size()),
+				String.humanize_size(pack.pck_size),
+				String.humanize_size(pack.br_size),
+				", ".join(pack.depends) if not pack.depends.is_empty() else "无"
+			]
+		)
 		item.set_tooltip_text(3, "压缩后为原始大小的 %.1f%%" % (100.0 * pack.br_size / pack.pck_size))
+	var startup: Array[String] = []
+	_export_startup("bootstrap", manifest, startup)
+	var scene := str(manifest.get("project_scene", manifest.get("entry_scene", "")))
+	if manifest.scene_to_pack.has(scene):
+		_export_startup(manifest.scene_to_pack[scene], manifest, startup)
+	var compressed := 0
+	for id: String in startup:
+		compressed += int(manifest.packs[id].br_size)
+	var row := report.create_item(root)
+	_cells(row, ["启动合计", "", "", String.humanize_size(compressed), ", ".join(startup)])
+	row.set_tooltip_text(4, "首次进入 Godot 前需准备这些包；其余包在运行时按需准备。")
+
+
+func _export_startup(id: String, manifest: Dictionary, result: Array[String]) -> void:
+	if id in result or not manifest.packs.has(id):
+		return
+	result.append(id)
+	for dependency: String in manifest.packs[id].depends:
+		_export_startup(dependency, manifest, result)
+
 
 ## 开始新的后台导出，清除上次的进度状态。
 func start_export_progress(total: int) -> void:
@@ -274,6 +329,7 @@ func start_export_progress(total: int) -> void:
 	progress_label.text = "准备导出"
 	progress_count.text = "0/%s 步" % total
 	show_message("准备导出 · 0/%s 步" % total, "后台导出已启动，期间请勿修改资源。", true)
+
 
 ## 显示工作进程报告的真实步骤进度与当前阶段。
 func show_export_progress(done: int, total: int, stage: String) -> void:
@@ -285,7 +341,12 @@ func show_export_progress(done: int, total: int, stage: String) -> void:
 	progress_label.text = stage
 	progress_label.tooltip_text = stage
 	progress_count.text = "%s/%s 步" % [done, total]
-	show_message("%s · %s/%s 步" % [stage, done, total], "当前阶段：%s\n已完成 %s/%s 个导出步骤。" % [stage, done, total], true)
+	show_message(
+		"%s · %s/%s 步" % [stage, done, total],
+		"当前阶段：%s\n已完成 %s/%s 个导出步骤。" % [stage, done, total],
+		true
+	)
+
 
 ## 保留失败时已完成的步骤；只有成功时将进度置满。
 func finish_export_progress(success: bool) -> void:
@@ -296,11 +357,13 @@ func finish_export_progress(success: bool) -> void:
 	else:
 		progress_label.text = "导出中断"
 
+
 func _cells(item: TreeItem, values: Array) -> void:
 	for index in values.size():
 		item.set_text(index, values[index])
 		item.set_tooltip_text(index, values[index])
 		item.set_text_overrun_behavior(index, TextServer.OVERRUN_TRIM_ELLIPSIS)
+
 
 func set_busy(busy: bool) -> void:
 	export_button.disabled = busy

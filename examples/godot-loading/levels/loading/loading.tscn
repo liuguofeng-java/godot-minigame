@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://levels/loading/loading.gd" id="controller"]
+[ext_resource type="PackedScene" path="res://levels/loading/loading_view.tscn" id="view"]
+
+[node name="LoadingScene" type="Node"]
+
+[node name="Loading" type="Node" parent="."]
+script = ExtResource("controller")
+
+[node name="View" parent="Loading" instance=ExtResource("view")]

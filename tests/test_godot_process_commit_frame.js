@@ -18,7 +18,10 @@ function processFixture(source, runs = 1) {
     fs.writeFileSync(outputPath, source);
     try {
         for (let i = 0; i < runs; i += 1) {
-            childProcess.execFileSync(process.execPath, [SCRIPT_PATH], { cwd: root, stdio: "pipe" });
+            childProcess.execFileSync(process.execPath, [SCRIPT_PATH], {
+                cwd: root,
+                stdio: "pipe",
+            });
         }
         return fs.readFileSync(outputPath, "utf8");
     } finally {
@@ -35,7 +38,10 @@ const generatedGlue = [
 ].join("");
 
 const processed = processFixture(generatedGlue, 2);
-assert(!processed.includes(EMPTY_SHIM), "must not replace Emscripten's commit implementation with a no-op");
+assert(
+    !processed.includes(EMPTY_SHIM),
+    "must not replace Emscripten's commit implementation with a no-op"
+);
 assert.strictEqual(processed.split(WRAPPER_MARKER).length - 1, 1, "wrapper must be idempotent");
 
 const context = {};
@@ -59,17 +65,25 @@ const offscreenGlue = generatedGlue.replace(
 );
 const offscreenContext = {};
 vm.createContext(offscreenContext);
-vm.runInContext(`${processFixture(offscreenGlue)}
+vm.runInContext(
+    `${processFixture(offscreenGlue)}
     GL.currentContext.defaultFbo={};
     GL.blitOffscreenFramebuffer=function(ctx){
         if(ctx!==GL.currentContext)throw new Error('Wrong framebuffer context');
         calls.push('blit');
     };
-    result=wasmImports.a();`, offscreenContext);
+    result=wasmImports.a();`,
+    offscreenContext
+);
 assert.strictEqual(offscreenContext.result, 0);
 assert.deepStrictEqual(Array.from(offscreenContext.calls), ["blit", "flush", "commit"]);
 
-const withoutCommitImport = processFixture("var existing=function(){};var wasmImports={a:existing};");
-assert(!withoutCommitImport.includes("_emscripten_webgl_commit_frame"), "must not invent a missing frame import");
+const withoutCommitImport = processFixture(
+    "var existing=function(){};var wasmImports={a:existing};"
+);
+assert(
+    !withoutCommitImport.includes("_emscripten_webgl_commit_frame"),
+    "must not invent a missing frame import"
+);
 
 console.log("godot_process commit-frame tests passed");

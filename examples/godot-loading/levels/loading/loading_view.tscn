@@ -1,0 +1,167 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://levels/loading/loading_view.gd" id="1"]
+[ext_resource type="FontFile" path="res://assets/fonts/noto-sans-sc-controls.ttf" id="2"]
+
+[sub_resource type="Gradient" id="Gradient"]
+colors = PackedColorArray(1, 0.784, 0.722, 1, 0.737, 0.533, 0.91, 1)
+
+[sub_resource type="GradientTexture2D" id="Backdrop"]
+gradient = SubResource("Gradient")
+fill_from = Vector2(0, 0)
+fill_to = Vector2(0.8, 1)
+
+[sub_resource type="StyleBoxFlat" id="Button"]
+content_margin_top = 10.0
+content_margin_bottom = 10.0
+bg_color = Color(0.31, 0.16, 0.38, 0.12)
+corner_radius_top_left = 7
+corner_radius_top_right = 7
+corner_radius_bottom_left = 7
+corner_radius_bottom_right = 7
+
+[sub_resource type="Theme" id="Theme"]
+default_font = ExtResource("2")
+default_font_size = 18
+Label/colors/font_color = Color(0.26, 0.13, 0.32, 1)
+Button/colors/font_color = Color(0.26, 0.13, 0.32, 1)
+Button/styles/normal = SubResource("Button")
+Button/styles/hover = SubResource("Button")
+Button/styles/pressed = SubResource("Button")
+
+[node name="LoadingView" type="CanvasLayer"]
+layer = 120
+script = ExtResource("1")
+
+[node name="Cover" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = SubResource("Theme")
+
+[node name="Background" type="TextureRect" parent="Cover"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = SubResource("Backdrop")
+expand_mode = 1
+
+[node name="Content" type="Control" parent="Cover"]
+unique_name_in_owner = true
+layout_mode = 0
+offset_right = 360.0
+offset_bottom = 300.0
+
+[node name="Mark" type="Control" parent="Cover/Content"]
+unique_name_in_owner = true
+layout_mode = 0
+offset_right = 56.0
+offset_bottom = 56.0
+
+[node name="Tile0" type="ColorRect" parent="Cover/Content/Mark"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 24.0
+offset_bottom = 24.0
+color = Color(0.40, 0.22, 0.46, 0.5)
+
+[node name="Tile1" type="ColorRect" parent="Cover/Content/Mark"]
+layout_mode = 0
+offset_left = 30.0
+offset_top = 0.0
+offset_right = 54.0
+offset_bottom = 24.0
+color = Color(0.40, 0.22, 0.46, 0.62)
+
+[node name="Tile2" type="ColorRect" parent="Cover/Content/Mark"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 30.0
+offset_right = 24.0
+offset_bottom = 54.0
+color = Color(0.40, 0.22, 0.46, 0.74)
+
+[node name="Tile3" type="ColorRect" parent="Cover/Content/Mark"]
+layout_mode = 0
+offset_left = 30.0
+offset_top = 30.0
+offset_right = 54.0
+offset_bottom = 54.0
+color = Color(0.40, 0.22, 0.46, 0.86)
+
+[node name="Status" type="Label" parent="Cover/Content"]
+unique_name_in_owner = true
+layout_mode = 0
+anchor_right = 1.0
+offset_top = 84.0
+offset_bottom = 116.0
+text = "正在准备"
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 22
+
+[node name="Percent" type="Label" parent="Cover/Content"]
+unique_name_in_owner = true
+layout_mode = 0
+anchor_right = 1.0
+offset_top = 118.0
+offset_bottom = 142.0
+text = ""
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 15
+
+[node name="Track" type="ColorRect" parent="Cover/Content"]
+unique_name_in_owner = true
+layout_mode = 0
+anchor_right = 1.0
+offset_top = 155.0
+offset_bottom = 159.0
+color = Color(0.31, 0.16, 0.38, 0.14)
+
+[node name="Detail" type="Label" parent="Cover/Content"]
+unique_name_in_owner = true
+layout_mode = 0
+anchor_right = 1.0
+offset_top = 170.0
+offset_bottom = 220.0
+text = ""
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 15
+
+[node name="Retry" type="Button" parent="Cover/Content"]
+unique_name_in_owner = true
+layout_mode = 0
+anchor_right = 1.0
+offset_top = 226.0
+offset_bottom = 266.0
+visible = false
+text = "重试"
+theme_override_font_sizes/font_size = 16
+
+[node name="Rollback" type="Button" parent="Cover/Content"]
+unique_name_in_owner = true
+layout_mode = 0
+anchor_right = 1.0
+offset_top = 274.0
+offset_bottom = 314.0
+visible = false
+text = "重启并使用上次成功版本"
+theme_override_font_sizes/font_size = 16
+
+[node name="Fill" type="ColorRect" parent="Cover/Content/Track"]
+unique_name_in_owner = true
+layout_mode = 0
+offset_bottom = 4.0
+color = Color(0.40, 0.22, 0.46, 0.85)

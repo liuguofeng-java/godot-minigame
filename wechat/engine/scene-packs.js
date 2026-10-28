@@ -16,10 +16,13 @@
                 reject(new Error("WeChat file system is not available"));
                 return;
             }
-            fs[method](Object.assign({}, options, {
-                success: resolve,
-                fail: (error) => reject(new Error(error && error.errMsg || method + " failed")),
-            }));
+            fs[method](
+                Object.assign({}, options, {
+                    success: resolve,
+                    fail: (error) =>
+                        reject(new Error((error && error.errMsg) || method + " failed")),
+                })
+            );
         });
     }
 
@@ -38,7 +41,7 @@
             const task = wxApi.loadSubpackage({
                 name: pack.subpackage,
                 success: () => resolve(pack.file),
-                fail: (error) => reject(new Error(error && error.errMsg || "Subpackage failed")),
+                fail: (error) => reject(new Error((error && error.errMsg) || "Subpackage failed")),
             });
             if (task && typeof task.onProgressUpdate === "function") {
                 task.onProgressUpdate((value) => report(listeners, value.progress || 0));
@@ -54,10 +57,12 @@
             }
             const task = wxApi.downloadFile({
                 url: pack.url,
-                success: (value) => value.statusCode === 200 && value.tempFilePath
-                    ? resolve(value.tempFilePath)
-                    : reject(new Error("PCK download failed: HTTP " + value.statusCode)),
-                fail: (error) => reject(new Error(error && error.errMsg || "PCK download failed")),
+                success: (value) =>
+                    value.statusCode === 200 && value.tempFilePath
+                        ? resolve(value.tempFilePath)
+                        : reject(new Error("PCK download failed: HTTP " + value.statusCode)),
+                fail: (error) =>
+                    reject(new Error((error && error.errMsg) || "PCK download failed")),
             });
             if (task && typeof task.onProgressUpdate === "function") {
                 task.onProgressUpdate((value) => report(listeners, value.progress || 0));
@@ -66,9 +71,16 @@
     }
 
     function decoded(bytes, pack) {
-        return gameGlobal.remotePack.decodeCompressed(bytes, Object.assign({
-            engine_version: manifest.engine_version,
-        }, pack), decodeBr);
+        return gameGlobal.remotePack.decodeCompressed(
+            bytes,
+            Object.assign(
+                {
+                    engine_version: manifest.engine_version,
+                },
+                pack
+            ),
+            decodeBr
+        );
     }
 
     async function obtain(pack, listeners) {
@@ -112,11 +124,15 @@
 
     function ensure(id, onProgress, onDone) {
         if (!manifest) {
-            if (typeof onDone === "function") onDone(JSON.stringify({ ok: false, error: "Scene pack manifest is not configured" }));
+            if (typeof onDone === "function")
+                onDone(
+                    JSON.stringify({ ok: false, error: "Scene pack manifest is not configured" })
+                );
             return;
         }
         if (ready.has(id)) {
-            if (typeof onDone === "function") onDone(JSON.stringify({ ok: true, path: manifest.packs[id].path }));
+            if (typeof onDone === "function")
+                onDone(JSON.stringify({ ok: true, path: manifest.packs[id].path }));
             return;
         }
         let current = pending.get(id);
@@ -127,8 +143,13 @@
         }
         current.listeners.push(onProgress);
         current.promise.then(
-            (path) => { if (typeof onDone === "function") onDone(JSON.stringify({ ok: true, path })); },
-            (error) => { if (typeof onDone === "function") onDone(JSON.stringify({ ok: false, error: String(error.message || error) })); },
+            (path) => {
+                if (typeof onDone === "function") onDone(JSON.stringify({ ok: true, path }));
+            },
+            (error) => {
+                if (typeof onDone === "function")
+                    onDone(JSON.stringify({ ok: false, error: String(error.message || error) }));
+            }
         );
     }
 

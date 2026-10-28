@@ -47,11 +47,11 @@ const REPLACE_RULES = [
         match: `e instanceof WebAssembly.RuntimeError`,
         replace: `e`,
     },
-	{
-		name: "wasm-runtimeerror-constructor",
-		match: `var e=new WebAssembly.RuntimeError(what);`,
-		replace: `var e=(typeof WebAssembly!=="undefined"&&typeof WebAssembly.RuntimeError==="function")?new WebAssembly.RuntimeError(what):new Error(what);`,
-	},
+    {
+        name: "wasm-runtimeerror-constructor",
+        match: `var e=new WebAssembly.RuntimeError(what);`,
+        replace: `var e=(typeof WebAssembly!=="undefined"&&typeof WebAssembly.RuntimeError==="function")?new WebAssembly.RuntimeError(what):new Error(what);`,
+    },
     {
         name: "stat-ino-guard",
         match: `HEAP64[buf+88>>3]=BigInt(stat.ino);`,
@@ -107,21 +107,23 @@ function ensureCommitFrameWrapper(content) {
 
     const wrapper = `${wrapperMarker}_emscripten_webgl_commit_frame=function(){var result=__godotMinigameOriginalCommitFrame();var context=typeof GL!=="undefined"&&GL.currentContext&&GL.currentContext.GLctx;if(context){if(typeof context.flush==="function"){context.flush()}if(typeof context.commit==="function"){context.commit()}}return result;};`;
     console.log("apply commit-frame-wrapper");
-    return content.replace(
-        WASM_IMPORTS_MARKER,
-        `${wrapper}${WASM_IMPORTS_MARKER}`
-    );
+    return content.replace(WASM_IMPORTS_MARKER, `${wrapper}${WASM_IMPORTS_MARKER}`);
 }
 
 let content = fs.readFileSync(GODOT_JS_PATH, "utf-8");
 
 // Godot exports the SafeEngine facade, not the internal Engine constructor.
 // Advertise the capability only when the compiled source contains its marker.
-if (content.includes("Engine['scenePackProtocol'] = 2;") &&
-        !content.includes("SafeEngine['scenePackProtocol']")) {
+if (
+    content.includes("Engine['scenePackProtocol'] = 2;") &&
+    !content.includes("SafeEngine['scenePackProtocol']")
+) {
     const facade = "SafeEngine['load'] = Engine.load;";
     if (!content.includes(facade)) throw new Error("Scene pack engine facade was not found");
-    content = content.replace(facade, "SafeEngine['scenePackProtocol'] = Engine['scenePackProtocol'];\n\t" + facade);
+    content = content.replace(
+        facade,
+        "SafeEngine['scenePackProtocol'] = Engine['scenePackProtocol'];\n\t" + facade
+    );
 }
 
 content = ensureInvokeImportMappings(content);

@@ -1,7 +1,7 @@
 # Godot 微信小游戏适配
 
 一个源码工程：**拉取官方 Godot → 应用微信适配 → 编译 Web 引擎 → 组装小游戏**。
-不再包含编辑器插件、DLL、`godot-cpp`、模板下载管理或预编译引擎。
+包含可独立安装的场景分包插件；不包含 DLL、`godot-cpp`、模板下载管理或预编译引擎。
 
 仓库根目录不是可直接运行的 Godot 游戏；它用于构建微信小游戏引擎模板。游戏内容需要从 Godot 项目另行导出为 PCK。
 
@@ -137,7 +137,7 @@ brotli --version
 
 ### 6. 从 scene-test 导出场景依赖分包
 
-通用“场景分包”插件通过文件树把多个目录或文件分配到同一个包，验证指定场景的递归依赖，导出 `manifest.json` 和 `.pck.br`。插件不上传资源或组装微信工程。生成安装包：`python tools/package_plugin.py`。安装、缓存更新和后台验证见[场景分包与远程加载](docs/scene-packs.md)。`scene-test` 已接入该插件并提供毒岛配置。
+通用“场景分包”插件通过文件树把多个目录或文件分配到同一个包，检查全项目所有场景的递归依赖，导出 `manifest.json` 和 `.pck.br`。插件不上传资源或组装微信工程。生成安装包：`python tools/package_plugin.py`。安装、缓存更新和后台验证见[场景分包与远程加载](docs/scene-packs.md)。`scene-test` 已接入独立 Godot 加载页，首屏仅下载轻量启动资源，玩法包由 GDScript 按需准备。schema-4、就绪确认及回退接口见同一文档。
 
 新流程按远程清单启动，持久缓存只保存压缩包；修改 B 后只下载新版 B，成功进入场景后清理旧缓存。需重新编译包含 `--extra-pack` 补丁的引擎，3D 项目必须使用 `--enable-3d`。组装示例：
 
@@ -167,3 +167,13 @@ source build/emsdk-4.7.2/emsdk_env.sh
 ```
 
 常见错误：`Missing SCons` 表示当前构建使用的 Python 未安装 SCons；`Missing emcc` 表示 SDK 环境没有成功加载；`Missing successful build metadata` 表示 `build` 尚未成功；`Output already exists` 表示需要换一个 `--output` 目录。命令入口是 `"$BUILD_PYTHON" build.py ...`，不能直接执行 `build.py ...`。
+
+## 源码格式与清理
+
+维护脚本采用 UTF-8、LF 和 100 列目标宽度；GDScript 用 Tab，Python/JS 用 4 空格。安装 `requirements-dev.txt` 后执行 `python tools/format_sources.py` 检查，加 `--write` 才修改。JS 默认通过 npx 使用 Prettier 3.6.2；已有 CLI 可用 `--prettier <prettier.cjs 路径>` 指定。脚本跳过引擎源码覆盖、补丁、第三方库、缓存和发布产物。
+
+资源及方法删除需检查动态调用、编辑器回调、信号和公开兼容接口。微信图片由加载器配置使用；即使远程加载页启用，旧模式的图像与桥接接口仍需保留。插件以 `addons/scene_packer` 为规范源，并同步 scene-test 安装副本；示例加载控制器与 scene-test 保持一致。
+
+注释优先说明生命周期、状态约束、数据单位与必要副作用。运行 `python tools/test.py` 和后台 Godot 导出/面板验证确认整理未破坏行为；格式化不要求重新编译引擎。
+
+本次清理范围、保留项、验证及安装包标识见[源码整理与验证](docs/source-maintenance.md)。

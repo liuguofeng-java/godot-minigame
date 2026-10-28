@@ -39,7 +39,7 @@ release/
 
 `bootstrap` 是保留包名，包含导出项目设置、UID/全局类索引和场景就绪通知脚本。业务资源仍在开发者指定的包中。临时 PCK、导入副本和解压校验文件不进入发布目录。
 
-清单 `schema: 3` 包含 `project_id`、`engine_version`、`bootstrap`、全项目的 `scene_to_pack`、`packs` 和 `release_id`。`project_scene` 仅记录引擎原有的默认启动场景，可为空；`scene_override` 记录工程是否允许运行时配置覆盖，均从 `project.godot` 自动读取。清单不再含 `entry_scene`。每个包记录相对 `url`、`compression: "br"`、`depends`、原始 `files`、实际 `archive_files`，以及压缩和解压两份数据的 SHA-256 与字节数。资源仍使用原来的 `res://` 路径。
+清单 `schema: 4` 包含 `project_id`、`engine_version`、`bootstrap`、全项目的 `scene_to_pack`、`packs` 和 `release_id`。`project_scene` 仅记录引擎原有的默认启动场景，可为空；`scene_override` 记录工程是否允许运行时配置覆盖，均从 `project.godot` 自动读取。清单不再含 `entry_scene`。新增 `startup_mode: "direct" | "godot_loading"`，取自项目设置 `scene_packer/startup_mode`，默认 `direct`。每个包记录相对 `url`、`compression: "br"`、`depends`、原始 `files`、实际 `archive_files`，以及压缩和解压两份数据的 SHA-256 与字节数。资源仍使用原来的 `res://` 路径。
 
 `release_id` 为去掉该字段后，递归按对象键排序、无空白 JSON 的 UTF-8 SHA-256；数组顺序保留。文件名使用压缩内容的完整 SHA-256。清单的包依赖必须是有向无环图。
 
@@ -53,7 +53,7 @@ release/
 python build.py package --manifest-url https://cdn.example.com/game/manifest.json --output dist/manifest-game
 ```
 
-该命令只写入清单 URL 和引擎版本，不下载或包含游戏包。填写输出工程 AppID 后导入微信开发者工具。配置模块的模式为 `manifest`，参数为 `manifest_url` 和 `engine_version`；默认按工程原有启动设置运行。原有 `local`、`remote`、`bundled_br`、schema-1 分包接口及 schema-2 清单继续保留。
+该命令只写入清单 URL 和引擎版本，不下载或包含游戏包。填写输出工程 AppID 后导入微信开发者工具。配置模块的模式为 `manifest`，参数为 `manifest_url` 和 `engine_version`；默认按工程原有启动设置运行。原有 `local`、`remote`、`bundled_br`、schema-1 分包接口及 schema-2/3 清单继续保留。
 
 局域网调试可单独生成 HTTP 工程，地址必须是可从开发者工具访问的私有 IPv4，且项目设置需保持“不校验合法域名”。此模式不会用于正式发布：
 
@@ -63,15 +63,15 @@ python build.py package --source build/godot-4.7.2-manifest --manifest-url http:
 
 此选项只在局域网调试模式允许同一 Godot 主次版本内、由较早补丁版本导出的资源包；例如 4.7.2 宿主可尝试加载 4.7.0 PCK。正式发布仍需 HTTPS 合法域名与匹配的引擎版本，并重新打包工程。`pack-pck` 仅用于单个 PCK 的固定 URL 发布，不适用于上述 `manifest.json` 多包流程。
 
-升级插件 3.0.0 时需要更新宿主的 `engine/manifest-packs.js` 和 `engine/godot-sdk.js`，并重新导出包含场景加载桥接脚本的启动包。已有支持 `--extra-pack` 的引擎可复用，无需为此次升级重新编译 WASM。
+升级插件 4.0.0 时需要更新宿主的 `engine/manifest-packs.js` 和 `engine/godot-sdk.js`，并重新导出包含场景加载桥接脚本的启动包。已有支持 `--extra-pack` 的引擎可复用，无需为此次升级重新编译 WASM。
 
 服务器先上传所有 `.pck.br`，最后发布清单，保持相对目录结构。建议使用 `Content-Type: application/octet-stream`；不要设置 `Content-Encoding: br`，客户端需要取得原始压缩字节并自行解压。清单应及时刷新缓存。清单域名加入微信 request 合法域名，压缩包域名加入 downloadFile 合法域名。
 
-启动时最多并发下载 3 个包，同包请求合并。压缩字节经过大小和 SHA-256 校验后解压，再检查 PCK 头、引擎版本和 SHA-256。所有依赖准备完成才初始化游戏。JS 把启动包和附加包写入虚拟文件系统，通过 `--main-pack` 和可重复的 `--extra-pack` 参数启动；引擎在读取项目设置和初始化 Autoload 前挂载全部包。
+启动时最多并发下载 3 个包，同包请求合并。压缩字节经过大小和 SHA-256 校验后解压，再检查 PCK 头、引擎版本和 SHA-256。启动依赖准备完成才初始化 Godot；加载页模式此时仅准备加载页及必要启动资源。JS 把启动包和附加包写入虚拟文件系统，通过 `--main-pack` 和可重复的 `--extra-pack` 参数启动；引擎在读取项目设置和初始化 Autoload 前挂载全部包。
 
 ## 选择和切换运行场景
 
-宿主可以在 `engine/pack-config.js` 的清单模式配置中添加 `scene`，为本次运行选择任意已导出的场景：
+直接启动模式（`direct`，以及旧 schema-2/3）中，宿主可以在 `engine/pack-config.js` 的清单模式配置中添加 `scene`，为本次运行选择任意已导出的场景：
 
 ```js
 export default {
@@ -107,15 +107,68 @@ loader.load_scene("res://levels/level_03.tscn")
 
 桥接节点由导出流程注入，普通编辑器运行不自动创建它；开发时可用 `get_node_or_null` 检查并走本地场景切换。不要把等待切换的逻辑仅保存在即将被释放的旧场景节点上。
 
+## Godot 加载页模式
+
+项目设置示例：
+
+```ini
+[application]
+run/main_scene="res://levels/loading/loading.tscn"
+
+[scene_packer]
+startup_mode="godot_loading"
+initial_scene="res://levels/poison_island/poison_island.tscn"
+```
+
+`initial_scene` 是示例加载控制器读取的延迟目标，业务也可自行选择其他目标。分析器检查该路径存在且已分包，但不将这个设置计入启动依赖；不要在加载脚本中 `preload()` 目标场景。插件仍全项目导出、检查所有场景，不提供入口选择器。加载页模式拒绝宿主的 `scene` 字段，防止绕过加载页。
+
+单独建立 `boot` 包，分配加载场景、控制器、图标和必需字体；不要分配玩法资源或引用玩法类。图标、Autoload、项目全局资源仍属于必要启动依赖，Autoload 若引用玩法包也会提前下载。分析结果展示启动包集合、源文件估算体积与依赖链；导出完成后显示启动压缩体积。scene-test 的启动集合应只有 `bootstrap + boot`；`gameplay`、`environment`、`shared` 在请求毒岛时才补齐。
+
+导出副本注入的 `/root/__ScenePackReady` 提供下列接口；普通编辑器运行用 `get_node_or_null` 判断是否存在。
+
+| 接口或信号 | 含义 |
+| --- | --- |
+| `prepare_scene(path) -> int` | 返回请求 ID，下载、校验、解压并挂载依赖；不加载或切换场景；同场景在途请求合并 |
+| `progress(id, stage, completed, total, pack_id)` | 阶段为 download、verify、decode、mount；下载单位为压缩字节，其余为包；total=0 表示未知 |
+| `packs_ready(id, path)` | 可调用 Godot ResourceLoader；控制器应忽略其他请求 ID |
+| `failed(id, code, message, retryable)` | resources 可重试；engine 表示挂载状态不确定，须重启 |
+| `confirm_scene_ready(path)` | 当前节点就绪且可选业务协议已通过后，等待绘制并提交成功版本 |
+| `scene_confirmed(path)` / `confirmation_failed(path, message)` | 提交完成或失败；保存失败可重试，不清理旧缓存 |
+| `can_rollback()` / `restart_previous()` | 检查并要求下次启动使用上次成功版本；错误通过 rollback_failed(message) 返回 |
+| `rollback_scene()` | 整版回退时已确认的旧关卡；示例优先使用它 |
+
+持久控制器的典型顺序：
+
+```gdscript
+# 在不会随旧场景释放的节点上连接信号并保存请求 ID。
+var bridge = get_node_or_null("/root/__ScenePackReady")
+var request_id = bridge.prepare_scene(target_path)
+# packs_ready(id, path) 中核对 request_id，再执行：
+ResourceLoader.load_threaded_request(target_path, "PackedScene", false)
+# 每帧检查 load_threaded_get_status；LOADED 后取 PackedScene 并切换。
+# 等业务准备完成和首帧绘制后：
+bridge.confirm_scene_ready(target_path)
+```
+
+可编辑示例位于 `examples/godot-loading/`；交付 ZIP 包含独立示例项目和插件。scene-test 的 `levels/loading/` 是接入副本，默认进入毒岛。Node 控制器 `loading.gd` 在启动后迁移到 SceneTree 根节点，持有独立的 CanvasLayer 界面 `loading_view.tscn/.gd`；进度、错误和按钮意图通过信号连接。更换界面只需编辑 view 场景和脚本。资源准备、线程资源加载、实例化与业务预热分别处理。后续切换仍调用 `/root/SceneLoading.request_scene(path)`；再次进入启动场景会复用已有控制器，普通编辑器运行跳过远程步骤。
+
+需要协调本地预热遮罩时，通过 `scene_loading_controller` 组获取控制器，读取 `is_loading()` 并订阅 `activity_changed(active)`。该协议不要求预热组件引用加载页类或读写根节点元数据；关卡单独运行且没有控制器时使用本地遮罩。升级示例时替换整个 `levels/loading/` 目录并重新导出 boot，避免遗漏独立 view 文件；宿主运行协议和插件版本保持兼容。
+
+目标场景可实现 `is_ready_for_play() -> bool`、`preparation_progress(completed: int, total: int)`、`preparation_finished(success: bool, message: String)`、`retry_preparation()`，以及可选 `get_preparation_error() -> String`。若在 `_ready()` 内同步报告失败，需提供该方法以便控制器读取已发生的失败状态。没有协议时以节点就绪与首帧绘制为准；只有 readiness 方法时控制器逐帧检查。加载控制器不引用毒岛类；毒岛装配脚本将 LevelReadiness 与 RenderWarmup 状态转发到通用协议。统一加载层显示时，原预热遮罩隐藏；F6 单独运行毒岛仍显示原遮罩。业务冻结继续由 LevelReadiness 管理。
+
+微信加载界面在 Godot 加载页首帧后关闭，此时立即接受资源请求，不等待版本确认。下载最大并发 3，已挂载包复用；逐包解码一次、写入虚拟文件系统、通过 GDScript 挂载，并在阶段间让出绘制机会。单线程 Web 的一次解码、实例化或 Shader 编译仍可能阻塞动画；本次不引入 Worker、不修改引擎。未知工作量显示等待状态；预热数量是已提交绘制任务，不表示 GPU 编译完全完成。
+
 ## 缓存、更新与故障
 
-磁盘只缓存 `.br`，解压 PCK 仅保留于本次运行的虚拟文件系统。缓存按清单地址隔离，再按项目、引擎版本和包哈希区分。每次启动请求清单，同次运行固定使用同一份清单，不执行运行中热替换。
+磁盘只缓存 `.br`，解压 PCK 只保留于本次运行的虚拟文件系统。缓存按清单地址隔离，再按项目、引擎版本与包哈希区分。同次运行固定清单；只改 B 时 A/C 复用，需要 B 时才下载新版。
 
-只修改 B 时复用 A/C，仅在需要 B 时下载新版 B。启动场景就绪后原子提交成功清单，删除新清单已不再引用的旧缓存；本版本其他场景的已有缓存保留。启动前网络、校验或解压失败时，只能整体回退到所选场景依赖缓存完整的上次成功版本。启动失败保留旧版本，不在同一进程中混挂新旧包。
+成功记录为 `{record_schema: 1, manifest, confirmed_scene}`，兼容读取旧版直接保存的清单。加载页显示、packs_ready、场景实例化均不提交成功版本；目标业务就绪后才提交，并删除新清单不再引用的旧缓存。新清单其他关卡的已有缓存保留。
 
-运行中切换场景始终使用启动时固定的清单，不重新请求新版本，也不回退到其他清单。下载或解压失败时保留当前场景，可以重试；挂载或引擎切换失败后要求重启，避免继续使用状态不确定的引擎。离线回退会话仅使用旧清单对应的已有缓存，未缓存关卡会明确失败。
+启动前获取清单、下载或解码失败，可以整体回退旧版本，但必须校验加载页、上次确认关卡及全部依赖的压缩缓存和解压内容。仅有加载页缓存不算完整版本。加载页按 `rollback_scene()` 进入已确认关卡。首次运行没有成功记录时需要联网。
 
-缓存文件损坏时联网重新下载；断网且缓存不完整时明确报错。首次启动必须联网。哈希用于完整性检查，不替代 HTTPS 和发布服务器的访问控制。
+启动后禁止混挂旧包。资源失败保留 Godot 页面，可原地重试；预热失败使用业务 retry_preparation；挂载或引擎状态不确定时要求重启。示例“重启并使用上次成功版本”先校验旧缓存、写入一次性回退标记，再调用宿主 `wx.restartMiniProgram`；重启失败删除标记，下次启动消费标记并重新校验旧缓存。宿主不支持重启 API 时提示失败。目标成功前保留旧记录和旧包，成功后才清理。
+
+缓存损坏时联网重新下载，离线且缓存不完整时明确报错。哈希只检查完整性，不能代替 HTTPS。保留 `GODOTSDK.loadScene()` 与旧桥接 `load_scene()` 兼容入口；它们不会自动等待自定义预热协议，加载页应使用拆分接口。
 
 ## 后台验证
 
@@ -131,6 +184,10 @@ python tools/verify_manifest_web.py --host <packaged-wechat-project> --release <
 
 `verify_manifest_web.py` 另需 Python Playwright 和 Microsoft Edge。它在无窗口浏览器内运行实际编译的 3D WebAssembly 引擎，使用模拟 wx 文件系统和本地路由，确认压缩包通过真实加载器挂载、场景就绪且成功清单已提交。使用 `--scene res://x/X.tscn --then-scene res://a/A.tscn --then-scene res://x/X.tscn` 验证任意场景启动与运行中切换、依赖补载及不重复下载。输出日志在 `build/manifest-web-verification/`；使用 `--output` 可更换目录。所有资源来自导出版本，不允许读取源工程补齐缺失文件。
 
+加载页可用 `--confirmed-scene res://a/A.tscn` 验证；加 `--fail-gameplay-once` 在后台模拟一次下载失败并点击 Godot 重试按钮。测试记录首帧、包请求、预热与版本提交顺序，并保存加载/失败/完成截图。
+
 JS 回归验证依赖顺序、并发限制、压缩缓存、损坏重下载、版本提交失败、整版离线回退及禁止混版。模拟微信接口和无头 Godot 不能代替微信宿主与 Android/iOS 真机验收。
+
+执行 `python tools/package_loading_delivery.py` 生成 `dist/scene-packer-runtime-4.0.0.zip` 与 `dist/godot-loading-example-4.0.0.zip`；输出文件已存在时拒绝覆盖，可用 `--output-dir` 指定新目录。插件 ZIP 单独由 package_plugin.py 生成。运行端 ZIP 覆盖微信工程的对应 engine 脚本，保留工程自身清单 URL、AppID 和现有 3D 引擎；例子 ZIP 是可编辑项目。
 
 已执行的检查、产物标识及未测范围见[验证记录](scene-packs-validation.md)。

@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "project_id": "godot-loading-example",
+  "packs": {
+    "boot": {
+      "paths": [
+        "res://levels/loading",
+        "res://assets/fonts"
+      ],
+      "depends": []
+    },
+    "demo": {
+      "paths": [
+        "res://levels/demo"
+      ],
+      "depends": []
+    }
+  }
+}

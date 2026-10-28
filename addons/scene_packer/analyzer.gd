@@ -19,21 +19,35 @@ var extra: Dictionary = {}
 var traces: Dictionary = {}
 var pack_traces: Dictionary = {}
 
+
 func scan(root: String = "res://") -> Array[String]:
 	var result: Array[String] = []
 	var directory := DirAccess.open(root)
 	if directory == null:
 		return result
 	for name in directory.get_files():
-		if not name.begins_with(".") and not name.ends_with(".import") and not name.ends_with(".uid") and name != "export_presets.cfg" and name != "project.godot" and name != "scene_packs.json":
+		if (
+			not name.begins_with(".")
+			and not name.ends_with(".import")
+			and not name.ends_with(".uid")
+			and name != "export_presets.cfg"
+			and name != "project.godot"
+			and name != "scene_packs.json"
+		):
 			result.append(root.path_join(name))
 	for name in directory.get_directories():
 		var child := root.path_join(name)
-		if name.begins_with(".") or name in IGNORED or child == "res://addons/scene_packer" or FileAccess.file_exists(child.path_join(".gdignore")):
+		if (
+			name.begins_with(".")
+			or name in IGNORED
+			or child == "res://addons/scene_packer"
+			or FileAccess.file_exists(child.path_join(".gdignore"))
+		):
 			continue
 		result.append_array(scan(child))
 	result.sort()
 	return result
+
 
 func _editor_plugin_resource(path: String) -> bool:
 	var parent := path.get_base_dir()
@@ -43,6 +57,8 @@ func _editor_plugin_resource(path: String) -> bool:
 		parent = parent.get_base_dir()
 	return false
 
+
+## 每次检查全项目归属和依赖闭包；缓存仅复用未改变文件的静态依赖，不缓存验证结果。
 func analyze(config: Dictionary) -> Dictionary:
 	var previous_files := files
 	var previous_classes := classes.duplicate()
@@ -82,7 +98,10 @@ func analyze(config: Dictionary) -> Dictionary:
 			var is_directory := DirAccess.dir_exists_absolute(selection)
 			var matched := false
 			for file: String in files:
-				if file == selection or (is_directory and file.begins_with(selection.trim_suffix("/") + "/")):
+				if (
+					file == selection
+					or (is_directory and file.begins_with(selection.trim_suffix("/") + "/"))
+				):
 					matched = true
 					if not SELECTION.selected(definition, file):
 						continue
@@ -102,7 +121,17 @@ func analyze(config: Dictionary) -> Dictionary:
 	var project_config := ConfigFile.new()
 	project_config.load("res://project.godot")
 	# This is engine metadata, never a separate plugin setting or an export filter.
-	var project_scene := _resolve(str(project_config.get_value("application", "run/main_scene", "")))
+	var project_scene := _resolve(
+		str(project_config.get_value("application", "run/main_scene", ""))
+	)
+	var startup_mode := str(project_config.get_value("scene_packer", "startup_mode", "direct"))
+	var initial_scene := _resolve(
+		str(project_config.get_value("scene_packer", "initial_scene", ""))
+	)
+	if startup_mode not in ["direct", "godot_loading"]:
+		errors.append("无效启动模式：" + startup_mode)
+	if startup_mode == "godot_loading" and project_scene.is_empty():
+		errors.append("Godot 加载页模式需要在工程设置中指定加载场景。")
 	for section: String in project_config.get_sections():
 		if section.begins_with("editor") or section == "scene_packer":
 			continue
@@ -170,10 +199,51 @@ func analyze(config: Dictionary) -> Dictionary:
 			if file.ends_with(".tscn") or file.ends_with(".scn"):
 				scenes[file] = id
 	boot_dependencies.sort()
-	return {"errors": errors.duplicate(), "owners": owners.duplicate(), "packs": selected,
-		"depends": graph.duplicate(true), "order": order, "sizes": sizes,
-		"scene_to_pack": scenes, "bootstrap_depends": boot_dependencies, "project_scene": project_scene,
-		"scene_override": not bool(project_config.get_value("application", "config/disable_project_settings_override", false))}
+	if (
+		not initial_scene.is_empty()
+		and (not scenes.has(initial_scene) or initial_scene == project_scene)
+	):
+		errors.append("延迟加载目标不存在、未分包或与加载页相同：" + initial_scene)
+	var startup: Array[String] = []
+	var startup_traces: Dictionary = {}
+	for id: String in boot_dependencies:
+		_startup_visit(id, startup, startup_traces, ["bootstrap"])
+	if owners.has(project_scene):
+		_startup_visit(owners[project_scene], startup, startup_traces, [project_scene])
+	var startup_bytes := 0
+	for id: String in startup:
+		startup_bytes += int(sizes.get(id, 0))
+	return {
+		"errors": errors.duplicate(),
+		"owners": owners.duplicate(),
+		"packs": selected,
+		"depends": graph.duplicate(true),
+		"order": order,
+		"sizes": sizes,
+		"scene_to_pack": scenes,
+		"bootstrap_depends": boot_dependencies,
+		"project_scene": project_scene,
+		"startup_mode": startup_mode,
+		"startup_packs": startup,
+		"startup_bytes": startup_bytes,
+		"startup_traces": startup_traces,
+		"scene_override":
+		not bool(
+			project_config.get_value(
+				"application", "config/disable_project_settings_override", false
+			)
+		)
+	}
+
+
+func _startup_visit(id: String, result: Array[String], chains: Dictionary, parent: Array) -> void:
+	if id in result:
+		return
+	result.append(id)
+	chains[id] = parent + [id]
+	for dependency: String in graph.get(id, []):
+		_startup_visit(dependency, result, chains, chains[id])
+
 
 func _collect_setting(value: Variant, result: Array[String]) -> void:
 	if value is String or value is StringName:
@@ -189,6 +259,7 @@ func _collect_setting(value: Variant, result: Array[String]) -> void:
 		for item: Variant in value.values():
 			_collect_setting(item, result)
 
+
 func _resolve(path: String) -> String:
 	if "::" in path:
 		path = path.get_slice("::", path.get_slice_count("::") - 1)
@@ -198,9 +269,16 @@ func _resolve(path: String) -> String:
 			return ResourceUID.get_id_path(id)
 	return path
 
+
 func _dependencies(path: String) -> Array[String]:
 	var signature := str(FileAccess.get_modified_time(path))
-	if path.ends_with(".gd") or path.ends_with(".gdshader") or path.ends_with(".gdshaderinc") or path.ends_with(".tscn") or path.ends_with(".tres"):
+	if (
+		path.ends_with(".gd")
+		or path.ends_with(".gdshader")
+		or path.ends_with(".gdshaderinc")
+		or path.ends_with(".tscn")
+		or path.ends_with(".tres")
+	):
 		# 同一秒内保存文本资源时，内容哈希仍可识别依赖变化。
 		signature += ":" + FileAccess.get_sha256(path)
 	if dependencies.has(path) and dependency_signatures.get(path, "") == signature:
@@ -212,7 +290,9 @@ func _dependencies(path: String) -> Array[String]:
 			if resolved != path and resolved not in result:
 				result.append(resolved)
 	if path.ends_with(".gd") or path.ends_with(".gdshader") or path.ends_with(".gdshaderinc"):
-		var source := _mask_source(FileAccess.get_file_as_string(path), not path.ends_with(".gd"), false)
+		var source := _mask_source(
+			FileAccess.get_file_as_string(path), not path.ends_with(".gd"), false
+		)
 		var paths := RegEx.create_from_string("[\"']((?:res|uid)://[^\"']+)[\"']")
 		for match_result: RegExMatch in paths.search_all(source):
 			if _dynamic_suffix(source.substr(match_result.get_end()).strip_edges()):
@@ -224,7 +304,9 @@ func _dependencies(path: String) -> Array[String]:
 				continue
 			if resolved != path and resolved not in result:
 				result.append(resolved)
-		var relative_paths := RegEx.create_from_string("(?:\\b(?:preload|load)\\s*\\(\\s*|\\bextends\\s+|#include\\s+)[\"']([^\"']+)[\"']")
+		var relative_paths := RegEx.create_from_string(
+			"(?:\\b(?:preload|load)\\s*\\(\\s*|\\bextends\\s+|#include\\s+)[\"']([^\"']+)[\"']"
+		)
 		for match_result: RegExMatch in relative_paths.search_all(source):
 			if _dynamic_suffix(source.substr(match_result.get_end()).strip_edges()):
 				continue
@@ -236,7 +318,9 @@ func _dependencies(path: String) -> Array[String]:
 				result.append(resolved)
 		# Global script classes are implicit references, absent from scene ext_resources.
 		var words := RegEx.create_from_string("\\b[A-Za-z_][A-Za-z0-9_]*\\b")
-		for word: RegExMatch in words.search_all(_mask_source(source, not path.ends_with(".gd"), true)):
+		for word: RegExMatch in words.search_all(
+			_mask_source(source, not path.ends_with(".gd"), true)
+		):
 			var name := word.get_string()
 			if classes.has(name) and classes[name] != path and classes[name] not in result:
 				result.append(classes[name])
@@ -245,8 +329,10 @@ func _dependencies(path: String) -> Array[String]:
 	dependency_signatures[path] = signature
 	return result
 
+
 func _dynamic_suffix(tail: String) -> bool:
 	return tail.begins_with("+") or tail.begins_with("%") or tail.begins_with(".format(")
+
 
 func _mask_source(source: String, shader: bool, mask_strings: bool) -> String:
 	# Preserve character positions and newlines while hiding comments (and, for
@@ -255,8 +341,10 @@ func _mask_source(source: String, shader: bool, mask_strings: bool) -> String:
 	var index := 0
 	while index < source.length():
 		var character := source[index]
-		if character == "\"" or character == "'":
-			var delimiter := character.repeat(3) if source.substr(index, 3) == character.repeat(3) else character
+		if character == '"' or character == "'":
+			var delimiter := (
+				character.repeat(3) if source.substr(index, 3) == character.repeat(3) else character
+			)
 			var end := index + delimiter.length()
 			while end < source.length():
 				if source[end] == "\\":
@@ -267,7 +355,11 @@ func _mask_source(source: String, shader: bool, mask_strings: bool) -> String:
 				else:
 					end += 1
 			var literal := source.substr(index, end - index)
-			result += RegEx.create_from_string("[^\\n]").sub(literal, " ", true) if mask_strings else literal
+			result += (
+				RegEx.create_from_string("[^\\n]").sub(literal, " ", true)
+				if mask_strings
+				else literal
+			)
 			index = end
 		elif (not shader and character == "#") or (shader and source.substr(index, 2) == "//"):
 			while index < source.length() and source[index] != "\n":
@@ -276,12 +368,15 @@ func _mask_source(source: String, shader: bool, mask_strings: bool) -> String:
 		elif shader and source.substr(index, 2) == "/*":
 			var end := source.find("*/", index + 2)
 			end = source.length() if end < 0 else end + 2
-			result += RegEx.create_from_string("[^\\n]").sub(source.substr(index, end - index), " ", true)
+			result += RegEx.create_from_string("[^\\n]").sub(
+				source.substr(index, end - index), " ", true
+			)
 			index = end
 		else:
 			result += character
 			index += 1
 	return result
+
 
 func _require(path: String, origin: String, active: Dictionary, pending: Array) -> void:
 	var chain: Array = Array(traces.get(origin, [])).duplicate()
@@ -305,12 +400,14 @@ func _require(path: String, origin: String, active: Dictionary, pending: Array) 
 			active[id] = true
 			pending.append(id)
 
+
 func _add_edge(id: String, dep: String, active: Dictionary, pending: Array) -> void:
 	if id != dep and dep not in graph[id]:
 		graph[id].append(dep)
 	if not active.has(dep):
 		active[dep] = true
 		pending.append(dep)
+
 
 func _visit(id: String, visiting: Array[String], visited: Dictionary, order: Array[String]) -> void:
 	if id in visiting:

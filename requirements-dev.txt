@@ -1,0 +1,2 @@
+gdtoolkit==4.3.4
+ruff==0.16.8

@@ -40,9 +40,9 @@
             const ratio = Math.max(
                 1,
                 Number(info && (info.pixelRatio || info.devicePixelRatio)) ||
-                Number(gameGlobal.__godotMinigamePixelRatio) ||
-                Number(windowObject.devicePixelRatio) ||
-                1
+                    Number(gameGlobal.__godotMinigamePixelRatio) ||
+                    Number(windowObject.devicePixelRatio) ||
+                    1
             );
 
             gameGlobal.__godotMinigamePixelRatio = ratio;
@@ -52,7 +52,10 @@
 
         syncWindowDevicePixelRatio(ratio) {
             try {
-                const descriptor = Object.getOwnPropertyDescriptor(windowObject, "devicePixelRatio");
+                const descriptor = Object.getOwnPropertyDescriptor(
+                    windowObject,
+                    "devicePixelRatio"
+                );
                 if (!descriptor || descriptor.configurable) {
                     Object.defineProperty(windowObject, "devicePixelRatio", {
                         configurable: true,
@@ -150,8 +153,16 @@
 
             this.texture = this.gl.createTexture();
             this.gl.bindTexture(this.gl.TEXTURE_2D, this.texture);
-            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
-            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
+            this.gl.texParameteri(
+                this.gl.TEXTURE_2D,
+                this.gl.TEXTURE_WRAP_S,
+                this.gl.CLAMP_TO_EDGE
+            );
+            this.gl.texParameteri(
+                this.gl.TEXTURE_2D,
+                this.gl.TEXTURE_WRAP_T,
+                this.gl.CLAMP_TO_EDGE
+            );
             this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
             this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
         }
@@ -186,7 +197,9 @@
             }
 
             const relative = src.charAt(0) === "/" ? src.slice(1) : src;
-            return [relative, "/" + relative].filter((item, index, list) => item && list.indexOf(item) === index);
+            return [relative, "/" + relative].filter(
+                (item, index, list) => item && list.indexOf(item) === index
+            );
         }
 
         loadImage(src, label, assign) {
@@ -207,7 +220,12 @@
                     image.src = sources[index];
                     return;
                 }
-                console.warn("[godot-loader] image load failed", label, image.src, event && (event.errMsg || event.message || event));
+                console.warn(
+                    "[godot-loader] image load failed",
+                    label,
+                    image.src,
+                    event && (event.errMsg || event.message || event)
+                );
             };
             image.src = sources[index];
         }
@@ -268,7 +286,13 @@
             const scale = Math.max(width / image.width, height / image.height);
             const drawWidth = image.width * scale;
             const drawHeight = image.height * scale;
-            ctx.drawImage(image, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+            ctx.drawImage(
+                image,
+                (width - drawWidth) / 2,
+                (height - drawHeight) / 2,
+                drawWidth,
+                drawHeight
+            );
         }
 
         render() {
@@ -334,7 +358,13 @@
             if (this.config.iconConfig.visible && this.iconImage) {
                 const iconX = (width - iconConfig.width * this.dpr) / 2;
                 const iconY = height - iconConfig.bottom * this.dpr - iconConfig.height * this.dpr;
-                ctx.drawImage(this.iconImage, iconX, iconY, iconConfig.width * this.dpr, iconConfig.height * this.dpr);
+                ctx.drawImage(
+                    this.iconImage,
+                    iconX,
+                    iconY,
+                    iconConfig.width * this.dpr,
+                    iconConfig.height * this.dpr
+                );
             }
 
             this.renderToWebGL();
@@ -411,8 +441,10 @@
 
             if (task && typeof task.onProgressUpdate === "function") {
                 task.onProgressUpdate(({ progress }) => {
-                    this.updateProgress(this.normalizeProgress(progress) * 0.5,
-                        this.config.textConfig.downloadingText[0]);
+                    this.updateProgress(
+                        this.normalizeProgress(progress) * 0.5,
+                        this.config.textConfig.downloadingText[0]
+                    );
                 });
             }
         }

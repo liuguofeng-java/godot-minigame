@@ -1,7 +1,7 @@
-import './native-audio-config'
-import './native-audio-manifest'
-import './weapp-adapter'
-import './godot-loader'
+import "./native-audio-config";
+import "./native-audio-manifest";
+import "./weapp-adapter";
+import "./godot-loader";
 function checkUpdate() {
     const updateManager = wx.getUpdateManager();
     updateManager.onCheckForUpdate(() => {
@@ -10,8 +10,8 @@ function checkUpdate() {
     });
     updateManager.onUpdateReady(() => {
         wx.showModal({
-            title: '更新提示',
-            content: '新版本已经准备好，是否重启应用？',
+            title: "更新提示",
+            content: "新版本已经准备好，是否重启应用？",
             success(res) {
                 if (res.confirm) {
                     // 新的版本已经下载好，调用 applyUpdate 应用新版本并重启
@@ -24,18 +24,18 @@ function checkUpdate() {
         // 新版本下载失败
     });
 }
-checkUpdate()
+checkUpdate();
 // Configuration
 const config = {
     textConfig: {
-        firstStartText: '首次加载请耐心等待',
-        downloadingText: ['正在加载资源', '加载中...', '请稍候...'],
-        compilingText: '编译中',
-        initText: '引擎初始化中',
-        completeText: '开始游戏',
+        firstStartText: "首次加载请耐心等待",
+        downloadingText: ["正在加载资源", "加载中...", "请稍候..."],
+        compilingText: "编译中",
+        initText: "引擎初始化中",
+        completeText: "开始游戏",
         textDuration: 1500,
         style: {
-            color: '#ffffff',
+            color: "#ffffff",
             fontSize: 14,
         },
     },
@@ -43,8 +43,8 @@ const config = {
         style: {
             width: 240,
             height: 25,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            foregroundColor: '#4CAF50',
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            foregroundColor: "#4CAF50",
             borderRadius: 20,
             padding: 2,
         },
@@ -57,10 +57,11 @@ const config = {
             bottom: 20,
         },
     },
-    materialConfig: { // 背景图或背景视频，两者都填时，先展示背景图，视频可播放后，播放视频
-        backgroundImage: 'images/background.jpg',
-        backgroundVideo: '',
-        iconImage: 'images/logo.png',
+    materialConfig: {
+        // 背景图或背景视频，两者都填时，先展示背景图，视频可播放后，播放视频
+        backgroundImage: "images/background.jpg",
+        backgroundVideo: "",
+        iconImage: "images/logo.png",
         // icon图片，一般不更换
     },
 };

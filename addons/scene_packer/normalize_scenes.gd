@@ -1,12 +1,17 @@
 extends SceneTree
+
+
 ## Godot 4.7 generates random editor recovery IDs when packing/importing scenes.
 ## Canonicalize both IDs and references together, after official export, without
 ## instantiating gameplay or changing node paths, properties, meshes or scripts.
 func _initialize() -> void:
 	_run.call_deferred()
 
+
 func _run() -> void:
-	var config: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(OS.get_cmdline_user_args()[0]))
+	var config: Dictionary = JSON.parse_string(
+		FileAccess.get_file_as_string(OS.get_cmdline_user_args()[0])
+	)
 	var scenes: Dictionary = {}
 	var replacements: Dictionary = {}
 	var used: Dictionary = {}

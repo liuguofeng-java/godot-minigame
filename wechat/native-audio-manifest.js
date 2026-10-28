@@ -1,1 +1,6 @@
-GameGlobal.__godotMinigameNativeAudioManifest = {"version":1,"aliases":{},"assets":{},"subpackages":[]};
+GameGlobal.__godotMinigameNativeAudioManifest = {
+    version: 1,
+    aliases: {},
+    assets: {},
+    subpackages: [],
+};

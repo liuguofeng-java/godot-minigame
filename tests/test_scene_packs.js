@@ -17,11 +17,19 @@ function fixture(name, mode) {
     const compressed = zlib.brotliCompressSync(raw);
     const file = `packs/${name}/${name}-${hash(compressed).slice(0, 16)}.pck.br`;
     return {
-        raw, compressed,
-        pack: { mode, file, path: `/engine/scene-${name}.pck`,
-            subpackage: `pack-${name}`, url: `https://example.com/${name}-${hash(compressed).slice(0, 16)}.pck.br`,
-            pck_size: raw.length, pck_sha256: hash(raw),
-            br_size: compressed.length, br_sha256: hash(compressed) },
+        raw,
+        compressed,
+        pack: {
+            mode,
+            file,
+            path: `/engine/scene-${name}.pck`,
+            subpackage: `pack-${name}`,
+            url: `https://example.com/${name}-${hash(compressed).slice(0, 16)}.pck.br`,
+            pck_size: raw.length,
+            pck_sha256: hash(raw),
+            br_size: compressed.length,
+            br_sha256: hash(compressed),
+        },
     };
 }
 
@@ -40,11 +48,21 @@ function harness(files = new Map()) {
             files.set(destPath, Buffer.from(files.get(srcPath)));
             success({});
         },
-        unlink({ filePath, success }) { files.delete(filePath); success({}); },
+        unlink({ filePath, success }) {
+            files.delete(filePath);
+            success({});
+        },
     };
     const context = {
-        console: { log() {}, warn() {}, error: console.error }, Buffer,
-        GameGlobal: { GODOTSDK: { copy_to_fs(path, bytes) { copied.set(path, Buffer.from(bytes)); } } },
+        console: { log() {}, warn() {}, error: console.error },
+        Buffer,
+        GameGlobal: {
+            GODOTSDK: {
+                copy_to_fs(path, bytes) {
+                    copied.set(path, Buffer.from(bytes));
+                },
+            },
+        },
         wx: {
             env: { USER_DATA_PATH: "/user" },
             getFileSystemManager: () => fileSystem,
@@ -69,16 +87,36 @@ function harness(files = new Map()) {
     vm.createContext(context);
     vm.runInContext(fs.readFileSync(path.join(engineDir, "remote-pack.js"), "utf8"), context);
     vm.runInContext(fs.readFileSync(path.join(engineDir, "scene-packs.js"), "utf8"), context);
-    const decode = (data) => zlib.brotliDecompressSync(Buffer.from(data.buffer, data.byteOffset, data.byteLength));
+    const decode = (data) =>
+        zlib.brotliDecompressSync(Buffer.from(data.buffer, data.byteOffset, data.byteLength));
     function configure(packs) {
-        context.GameGlobal.scenePacks.configure({ schema: 1, engine_version: "4.7.2", packs }, decode);
+        context.GameGlobal.scenePacks.configure(
+            { schema: 1, engine_version: "4.7.2", packs },
+            decode
+        );
     }
     function ensure(id) {
-        return new Promise((resolve) => context.GameGlobal.scenePacks.ensure(id, () => {},
-            (message) => resolve(JSON.parse(message))));
+        return new Promise((resolve) =>
+            context.GameGlobal.scenePacks.ensure(
+                id,
+                () => {},
+                (message) => resolve(JSON.parse(message))
+            )
+        );
     }
-    return { files, network, copied, configure, ensure,
-        get downloads() { return downloads; }, get subloads() { return subloads; } };
+    return {
+        files,
+        network,
+        copied,
+        configure,
+        ensure,
+        get downloads() {
+            return downloads;
+        },
+        get subloads() {
+            return subloads;
+        },
+    };
 }
 
 async function test() {
@@ -125,5 +163,9 @@ async function test() {
     assert.equal((await h6.ensure("remote")).ok, false, "Corrupt download must be rejected");
 }
 
-test().then(() => console.log("Scene pack local, remote, cache and failure tests passed"))
-    .catch((error) => { console.error(error); process.exitCode = 1; });
+test()
+    .then(() => console.log("Scene pack local, remote, cache and failure tests passed"))
+    .catch((error) => {
+        console.error(error);
+        process.exitCode = 1;
+    });
