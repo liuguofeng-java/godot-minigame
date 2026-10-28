@@ -166,6 +166,21 @@ function harness(saved = new Map()) {
 }
 async function tests() {
     await catalogTests();
+    const http = harness(),
+        httpRelease = release("http");
+    http.use(httpRelease);
+    http.network = new Map(
+        [...httpRelease.files].map(([url, bytes]) => [url.replace("https://", "http://"), bytes])
+    );
+    const httpSession = await http.api.prepare(
+        {
+            mode: "manifest",
+            manifest_url: "http://cdn.example/game/manifest.json",
+            engine_version: "4.7.2",
+        },
+        http.decoder
+    );
+    assert.equal(httpSession.manifest.release_id, httpRelease.manifest.release_id);
     const lan = harness(),
         localRelease = release("lan", 0);
     lan.use(localRelease);
@@ -182,7 +197,7 @@ async function tests() {
     };
     await assert.rejects(
         lan.api.prepare(localConfig, lan.decoder),
-        /Invalid manifest startup config/
+        /version/
     );
     const localSession = await lan.api.prepare({ ...localConfig, local_dev: true }, lan.decoder);
     assert.equal(localSession.manifest.engine_version, "4.7.0");
@@ -191,7 +206,7 @@ async function tests() {
     assert.throws(() => lan.api.validate(localRelease.manifest, "4.8.2", true), /version/);
     await assert.rejects(
         lan.api.prepare(
-            { ...localConfig, local_dev: true, manifest_url: "http://cdn.example/manifest.json" },
+            { ...localConfig, local_dev: true, manifest_url: "http://cdn.example/manifest.json?v=1" },
             lan.decoder
         ),
         /Invalid manifest startup config/

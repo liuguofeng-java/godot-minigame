@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import ipaddress
 import importlib.util
 import json
 import os
@@ -261,6 +260,31 @@ class Pipeline:
             digest.update(path.read_bytes())
         return digest.hexdigest()
 
+    def default_package_source(self):
+        default = (self.root / self.manifest["source_dir"]).resolve()
+        recipe = self.recipe_hash()
+
+        def matches(source):
+            try:
+                build = json.loads((source / ".wechat-build.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return False
+            return build.get("recipe") == recipe and build.get("base_ref") == self.manifest["base_ref"]
+
+        if matches(default):
+            return default
+        candidates = [
+            path.parent.resolve()
+            for path in (self.root / "build").glob("*/.wechat-build.json")
+            if matches(path.parent)
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            choices = ", ".join(str(path) for path in candidates)
+            raise RuntimeError(f"Multiple matching engine builds: {choices}. Specify --source.")
+        return default
+
     def fetch(self, source):
         require("git", "Install Git and add it to PATH.")
         if (source / ".git").exists():
@@ -486,23 +510,17 @@ class Pipeline:
             raise RuntimeError("--local-manifest-dev requires --manifest-url.")
         if manifest_url is not None:
             parsed = urlsplit(manifest_url)
-            try:
-                address = ipaddress.ip_address(parsed.hostname or "")
-                local_http = parsed.scheme == "http" and address.version == 4 and address.is_private
-            except ValueError:
-                local_http = False
             if (
-                not parsed.netloc
+                parsed.scheme not in ("http", "https")
+                or not parsed.hostname
                 or parsed.username
                 or parsed.password
                 or parsed.query
                 or parsed.fragment
                 or not parsed.path.endswith(".json")
-                or (not local_manifest_dev and parsed.scheme != "https")
-                or (local_manifest_dev and not local_http)
             ):
                 raise RuntimeError(
-                    "Manifest URL must be fixed HTTPS, or a private IPv4 HTTP URL with --local-manifest-dev."
+                    "Manifest URL must be a fixed HTTP or HTTPS .json URL without credentials, query, or fragment."
                 )
             if (
                 remote_pack_config is not None
@@ -649,8 +667,10 @@ class Pipeline:
             )
             if manifest_url is not None:
                 note = (
-                    "LOCAL HTTP MANIFEST DEV ONLY: reachable on the same LAN; not for release. "
+                    "LOCAL MANIFEST DEV ONLY: allows older patch-level packs for testing. "
                     if local_manifest_dev
+                    else "HTTP MANIFEST: check platform URL rules before release. "
+                    if urlsplit(manifest_url).scheme == "http"
                     else "REMOTE MANIFEST: upload the exported .pck.br files first, then manifest.json. "
                 ) + "Configure your own Mini Game AppID before preview.\n"
             elif bundled_pack_config is not None:
@@ -690,7 +710,11 @@ def main():
     for name in ("fetch", "apply", "build", "package", "pack-pck"):
         cmd = commands.add_parser(name)
         if name != "pack-pck":
-            cmd.add_argument("--source", type=Path, default=ROOT / pipeline.manifest["source_dir"])
+            cmd.add_argument(
+                "--source",
+                type=Path,
+                default=None if name == "package" else ROOT / pipeline.manifest["source_dir"],
+            )
         if name == "build":
             cmd.add_argument("--enable-3d", action="store_true")
             cmd.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 1))
@@ -701,12 +725,12 @@ def main():
             pack_group.add_argument("--remote-pack-config", type=Path)
             pack_group.add_argument("--bundled-pack-config", type=Path)
             pack_group.add_argument(
-                "--manifest-url", help="HTTPS URL of a schema-2/3 scene pack manifest"
+                "--manifest-url", help="HTTP or HTTPS URL of a schema-2/3 scene pack manifest"
             )
             cmd.add_argument(
                 "--local-manifest-dev",
                 action="store_true",
-                help="Allow a private IPv4 HTTP manifest for LAN debugging only",
+                help="Allow older patch-level scene packs for local testing",
             )
             cmd.add_argument("--scene-pack-manifest", type=Path)
         if name == "pack-pck":
@@ -718,7 +742,15 @@ def main():
         if args.command == "pack-pck":
             pipeline.pack_pck(args.pck.resolve(), args.base_url, args.output.resolve())
             return 0
-        source = args.source.resolve()
+        source = (
+            args.source.resolve()
+            if args.source is not None
+            else pipeline.default_package_source()
+        )
+        if args.command == "package" and args.source is None:
+            default = (pipeline.root / pipeline.manifest["source_dir"]).resolve()
+            if source != default:
+                print(f"Using matching engine build: {source}")
         if args.command == "fetch":
             pipeline.fetch(source)
         elif args.command == "apply":

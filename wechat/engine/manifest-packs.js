@@ -40,17 +40,8 @@
         for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i);
         return bytes;
     }
-    function https(url) {
-        return typeof url === "string" && /^https:\/\/[^/?#@\s]+\/[^?#\s]*$/.test(url);
-    }
-    function privateHttp(url) {
-        if (typeof url !== "string") return false;
-        const match =
-            /^http:\/\/((?:10|127)(?:\.\d{1,3}){3}|(?:192\.168|172\.(?:1[6-9]|2\d|3[01]))(?:\.\d{1,3}){2})(?::(\d{1,5}))?\/[^?#\s]*$/.exec(
-                url
-            );
-        if (!match || match[1].split(".").some((part) => Number(part) > 255)) return false;
-        return !match[2] || (Number(match[2]) > 0 && Number(match[2]) <= 65535);
+    function manifestUrl(url) {
+        return typeof url === "string" && /^https?:\/\/[^/?#@\s]+\/[^?#\s]*\.json$/.test(url);
     }
     function compatibleVersion(packVersion, engineVersion, localDev) {
         if (packVersion === engineVersion) return true;
@@ -390,10 +381,7 @@
     async function prepare(config, decoder, callback) {
         if (
             !config ||
-            !(
-                https(config.manifest_url) ||
-                (config.local_dev === true && privateHttp(config.manifest_url))
-            ) ||
+            !manifestUrl(config.manifest_url) ||
             !/^\d+\.\d+\.\d+$/.test(config.engine_version)
         )
             throw new Error("Invalid manifest startup config");

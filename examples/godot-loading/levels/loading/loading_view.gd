@@ -70,7 +70,7 @@ func _process(delta: float) -> void:
 	for index in 4:
 		var tile: Control = _mark.get_child(index)
 		tile.position.y = (
-			float(index / 2) * 30.0 - maxf(0.0, sin(_motion * 2.0 - index * 0.6)) * 5.0
+			floorf(float(index) / 2.0) * 30.0 - maxf(0.0, sin(_motion * 2.0 - index * 0.6)) * 5.0
 		)
 	_bar()
 

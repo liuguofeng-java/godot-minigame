@@ -100,6 +100,33 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(pipeline.main(), 0)
             fetch.assert_called_once_with((self.root / "build/isolated-version").resolve())
 
+    def test_cli_package_finds_matching_build_when_default_is_stale(self):
+        matching = self.root / "build/godot-4.7.2-manifest"
+        pipeline.write_json(
+            matching / ".wechat-build.json",
+            {"recipe": self.pipe.recipe_hash(), "base_ref": self.pipe.manifest["base_ref"]},
+        )
+        with (
+            mock.patch.object(pipeline, "ROOT", self.root),
+            mock.patch.object(pipeline, "Pipeline", return_value=self.pipe),
+            mock.patch.object(
+                pipeline.sys,
+                "argv",
+                ["engine.py", "package", "--manifest-url", "http://10.198.46.142:9000/manifest.json"],
+            ),
+            mock.patch.object(self.pipe, "package") as package,
+        ):
+            self.assertEqual(pipeline.main(), 0)
+            self.assertEqual(package.call_args.args[0], matching.resolve())
+
+        other = self.root / "build/another-matching-build"
+        pipeline.write_json(
+            other / ".wechat-build.json",
+            {"recipe": self.pipe.recipe_hash(), "base_ref": self.pipe.manifest["base_ref"]},
+        )
+        with self.assertRaisesRegex(RuntimeError, "Multiple matching engine builds"):
+            self.pipe.default_package_source()
+
     def test_old_emscripten_is_rejected_before_build(self):
         self.pipe.apply(self.source)
         with (
@@ -139,8 +166,26 @@ class PipelineTest(unittest.TestCase):
                 bundled_pack_config=Path("unused"),
                 manifest_url="https://cdn.example/manifest.json",
             )
-        with self.assertRaisesRegex(RuntimeError, "HTTPS"):
-            self.pipe.package(self.source, output, manifest_url="http://cdn.example/manifest.json")
+        public_http_output = Path(self.tmp.name) / "public-http-manifest-host"
+        self.pipe.package(
+            self.source,
+            public_http_output,
+            manifest_url="http://cdn.example/manifest.json",
+        )
+        self.assertIn(
+            "http://cdn.example/manifest.json",
+            (public_http_output / "engine/pack-config.js").read_text(),
+        )
+        self.assertIn("HTTP MANIFEST", (public_http_output / "BUILD_STATUS.txt").read_text())
+        private_http_output = Path(self.tmp.name) / "private-http-manifest-host"
+        self.pipe.package(
+            self.source,
+            private_http_output,
+            manifest_url="http://10.198.46.142:9000/manifest.json",
+        )
+        self.assertNotIn(
+            '"local_dev": true', (private_http_output / "engine/pack-config.js").read_text()
+        )
         local_output = Path(self.tmp.name) / "local-manifest-host"
         self.pipe.package(
             self.source,
@@ -152,14 +197,13 @@ class PipelineTest(unittest.TestCase):
         self.assertIn('"local_dev": true', local_config)
         self.assertIn('"engine_version": "4.7.2"', local_config)
         self.assertIn(
-            "LOCAL HTTP MANIFEST DEV ONLY", (local_output / "BUILD_STATUS.txt").read_text()
+            "LOCAL MANIFEST DEV ONLY", (local_output / "BUILD_STATUS.txt").read_text()
         )
-        with self.assertRaisesRegex(RuntimeError, "private IPv4"):
+        with self.assertRaisesRegex(RuntimeError, "fixed HTTP or HTTPS"):
             self.pipe.package(
                 self.source,
-                Path(self.tmp.name) / "public-http",
-                manifest_url="http://cdn.example/manifest.json",
-                local_manifest_dev=True,
+                Path(self.tmp.name) / "invalid-url",
+                manifest_url="http://cdn.example/manifest.json?version=1",
             )
 
     def fake_build(self):

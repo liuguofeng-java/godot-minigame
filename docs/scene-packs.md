@@ -47,7 +47,7 @@ release/
 
 ## 微信接入
 
-先使用当前补丁重新构建引擎；3D 项目需要 `--enable-3d`。已应用旧补丁的源码目录受保护，需要用新的 `--source` 目录依次执行 `fetch`、`apply`、`build`，并在 `package` 中使用同一目录。
+先使用当前补丁重新构建引擎；3D 项目需要 `--enable-3d`。已应用旧补丁的源码目录受保护，需要用新的 `--source` 目录依次执行 `fetch`、`apply`、`build`。`package` 未指定 `--source` 时会自动选择唯一匹配当前适配版本的已构建目录；若有多个匹配目录，则须显式指定 `--source`。
 
 ```text
 python build.py package --manifest-url https://cdn.example.com/game/manifest.json --output dist/manifest-game
@@ -55,13 +55,13 @@ python build.py package --manifest-url https://cdn.example.com/game/manifest.jso
 
 该命令只写入清单 URL 和引擎版本，不下载或包含游戏包。填写输出工程 AppID 后导入微信开发者工具。配置模块的模式为 `manifest`，参数为 `manifest_url` 和 `engine_version`；默认按工程原有启动设置运行。原有 `local`、`remote`、`bundled_br`、schema-1 分包接口及 schema-2/3 清单继续保留。
 
-局域网调试可单独生成 HTTP 工程，地址必须是可从开发者工具访问的私有 IPv4，且项目设置需保持“不校验合法域名”。此模式不会用于正式发布：
+清单地址允许固定的 HTTP 或 HTTPS `.json` URL。局域网调试时，地址需能从开发者工具访问，并在项目设置中关闭“校验合法域名”：
 
 ```text
-python build.py package --source build/godot-4.7.2-manifest --manifest-url http://192.168.1.10:9000/manifest.json --local-manifest-dev --output dist/manifest-lan
+python build.py package --source build/godot-4.7.2-manifest --manifest-url http://192.168.1.10:9000/manifest.json --output dist/manifest-lan
 ```
 
-此选项只在局域网调试模式允许同一 Godot 主次版本内、由较早补丁版本导出的资源包；例如 4.7.2 宿主可尝试加载 4.7.0 PCK。正式发布仍需 HTTPS 合法域名与匹配的引擎版本，并重新打包工程。`pack-pck` 仅用于单个 PCK 的固定 URL 发布，不适用于上述 `manifest.json` 多包流程。
+需要在调试时加载同一 Godot 主次版本、由较早补丁版本导出的资源包，可额外加 `--local-manifest-dev`；例如 4.7.2 宿主可尝试加载 4.7.0 PCK。正式发布需遵守微信平台的域名与协议要求，并使用匹配的引擎版本重新打包工程。`pack-pck` 仅用于单个 PCK 的固定 URL 发布，不适用于上述 `manifest.json` 多包流程。
 
 升级插件 4.0.0 时需要更新宿主的 `engine/manifest-packs.js` 和 `engine/godot-sdk.js`，并重新导出包含场景加载桥接脚本的启动包。已有支持 `--extra-pack` 的引擎可复用，无需为此次升级重新编译 WASM。
 
@@ -172,7 +172,7 @@ bridge.confirm_scene_ready(target_path)
 
 启动后禁止混挂旧包。资源失败保留 Godot 页面，可原地重试；预热失败使用业务 retry_preparation；挂载或引擎状态不确定时要求重启。示例“重启并使用上次成功版本”先校验旧缓存、写入一次性回退标记，再调用宿主 `wx.restartMiniProgram`；重启失败删除标记，下次启动消费标记并重新校验旧缓存。宿主不支持重启 API 时提示失败。目标成功前保留旧记录和旧包，成功后才清理。
 
-缓存损坏时联网重新下载，离线且缓存不完整时明确报错。哈希只检查完整性，不能代替 HTTPS。保留 `GODOTSDK.loadScene()` 与旧桥接 `load_scene()` 兼容入口；它们不会自动等待自定义预热协议，加载页应使用拆分接口。
+缓存损坏时联网重新下载，离线且缓存不完整时明确报错。哈希只检查完整性，不能防止 HTTP 清单在传输途中被替换；公开发布建议使用 HTTPS。保留 `GODOTSDK.loadScene()` 与旧桥接 `load_scene()` 兼容入口；它们不会自动等待自定义预热协议，加载页应使用拆分接口。
 
 ## 后台验证
 

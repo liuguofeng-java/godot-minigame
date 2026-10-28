@@ -145,6 +145,8 @@ brotli --version
 python build.py package --manifest-url https://cdn.example.com/game/manifest.json --output dist/wxgame-manifest
 ```
 
+清单地址也可使用固定的 HTTP `.json` URL，例如局域网调试时使用 `--manifest-url http://10.198.46.142:9000/manifest.json`，无需额外参数。发布时仍需确认微信平台接受该地址及其域名配置。`--local-manifest-dev` 仅用于调试时允许加载同一主次版本的较早补丁版本资源包。
+
 已有固定 schema-1 清单仍可使用原组装接口：
 
 ```bash

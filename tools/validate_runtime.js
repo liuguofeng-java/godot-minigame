@@ -45,33 +45,24 @@ function validateRuntime(directory) {
     assert(packMatch, "Invalid pack config module");
     const pack = JSON.parse(packMatch[1]);
     if (build.pack_mode === "manifest") {
-        let localHttp = false;
-        if (pack.local_dev === true && build.local_manifest_dev === true) {
-            const url = new URL(pack.manifest_url);
-            const parts = url.hostname.split(".").map(Number);
-            localHttp =
-                url.protocol === "http:" &&
-                parts.length === 4 &&
-                parts.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) &&
-                (parts[0] === 10 ||
-                    parts[0] === 127 ||
-                    (parts[0] === 192 && parts[1] === 168) ||
-                    (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)) &&
-                !url.username &&
-                !url.password &&
-                !url.search &&
-                !url.hash &&
-                url.pathname.endsWith(".json");
-        }
         assert(
             pack.mode === "manifest" &&
-                (localHttp || /^https:\/\/[^?#]+\.json$/.test(pack.manifest_url)),
+                typeof pack.manifest_url === "string" &&
+                /^https?:\/\/[^/?#@\s]+\/[^?#\s]*\.json$/.test(pack.manifest_url),
             "Invalid manifest URL"
+        );
+        assert(
+            (pack.local_dev === true) === (build.local_manifest_dev === true),
+            "Manifest local development flag mismatch"
         );
         assert(/^\d+\.\d+\.\d+$/.test(pack.engine_version), "Invalid manifest engine version");
         assert(
             read("BUILD_STATUS.txt").includes(
-                localHttp ? "LOCAL HTTP MANIFEST DEV ONLY" : "REMOTE MANIFEST"
+                pack.local_dev === true
+                    ? "LOCAL MANIFEST DEV ONLY"
+                    : pack.manifest_url.startsWith("http://")
+                    ? "HTTP MANIFEST"
+                    : "REMOTE MANIFEST"
             ),
             "Missing manifest-mode notice"
         );
